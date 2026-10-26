@@ -4,7 +4,7 @@
   <name>equipo_jar</name>
   <version>0.1.0</version>
   <description>Software del equipo para el Challenge JAR 2026 (búsqueda y rescate).</description>
-  <maintainer email="equipo@example.com">Nombre del equipo</maintainer>
+  <maintainer email="equipo@example.com">Equipo CHANGUITRON</maintainer>
   <license>MIT</license>
 
   <exec_depend>rclpy</exec_depend>

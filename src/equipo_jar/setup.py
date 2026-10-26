@@ -16,7 +16,7 @@ setup(
     ],
     install_requires=['setuptools'],
     zip_safe=True,
-    maintainer='Nombre del equipo',
+    maintainer='Equipo CHANGUITRON',
     maintainer_email='equipo@example.com',
     description='Software del equipo para el Challenge JAR 2026.',
     license='MIT',

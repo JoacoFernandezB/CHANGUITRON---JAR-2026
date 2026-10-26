@@ -1,0 +1,149 @@
+name: Publicar ranking
+
+# Tabla de práctica en Pages (§4.1, §8.2) y comentario con puntaje y gráfico en el PR.
+# Corre en contexto main y nunca ejecuta código de un PR: los artefactos y el
+# equipo.yaml del PR se leen como datos y tools/publicar_ranking.py los valida.
+# Los forks no pueden escribir acá: su token es de solo lectura.
+#
+# Solo publica PRs de forks (los de la organización son pruebas del template).
+# Si el PR toca tools/ o .github/, sus artefactos no los generó nuestro CI: se
+# comenta el PR pero no se publica nada. A la tabla entran solo corridas en verde.
+#
+# workflow_dispatch sirve para probar o republicar una corrida a mano.
+
+on:
+  workflow_run:
+    workflows: [Validar entrega]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Id de la corrida de "Validar entrega" a publicar
+        required: true
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: read
+
+# Sin grupo de concurrencia: GitHub deja una sola corrida pendiente por grupo y
+# cancela las demás, y cada una perdida es una entrada que falta. Las carreras se
+# resuelven al pushear: si gh-pages cambió, se vuelve a bajar y a generar.
+
+env:
+  REPO: ${{ github.repository }}
+  RUN_ID: ${{ github.event.workflow_run.id || inputs.run_id }}
+  BASE_URL: https://airclub-udesa.github.io/jar_challenge
+
+jobs:
+  publicar:
+    name: Publicar en Pages y comentar el PR
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    # Una corrida que espera aprobación también termina (action_required): esas no.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.event == 'pull_request' &&
+       contains(fromJSON('["success", "failure"]'), github.event.workflow_run.conclusion))
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Datos de la corrida y del PR
+        id: corrida
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          [[ "$RUN_ID" =~ ^[0-9]+$ ]] || { echo "::error::run_id inválido: $RUN_ID"; exit 1; }
+          saltear() { echo "::notice::no se publica: $1"; echo "seguir=no" >> "$GITHUB_OUTPUT"; exit 0; }
+          # Un nombre de rama no puede tener tabs ni espacios: @tsv alcanza.
+          IFS=$'\t' read -r event conclusion head_repo owner branch sha < <(
+            gh api "repos/$REPO/actions/runs/$RUN_ID" --jq '[.event, .conclusion,
+              .head_repository.full_name, .head_repository.owner.login, .head_branch, .head_sha] | @tsv')
+          [[ "$event" == pull_request ]] || saltear "la corrida no es de un PR ($event)"
+          [[ "$conclusion" == success || "$conclusion" == failure ]] || saltear "la corrida terminó en $conclusion"
+          [[ "$head_repo" != "$REPO" ]] || saltear "es un PR de la organización, no de un equipo"
+          # En las corridas de forks, workflow_run.pull_requests viene vacío: se busca por rama.
+          pr=$(gh api -X GET "repos/$REPO/pulls" -f state=open -f head="$owner:$branch" \
+            --jq "[.[] | select(.head.sha == \"$sha\")][0].number // empty")
+          [[ -n "$pr" ]] || saltear "no hay un PR abierto con el commit $sha (¿hubo otro push?)"
+          archivos=$(gh api --paginate "repos/$REPO/pulls/$pr/files" --jq '.[].filename')
+          toca=no
+          if grep -qE '^(\.github|tools)/' <<<"$archivos"; then toca=si; fi
+          gh api "repos/$head_repo/contents/equipo.yaml?ref=$sha" --jq .content \
+            | base64 -d > equipo.yaml 2>/dev/null || : > equipo.yaml
+          verde=no
+          if [[ "$conclusion" == success ]]; then verde=si; fi
+          {
+            echo "seguir=si"; echo "pr=$pr"; echo "sha=$sha"; echo "owner=$owner"
+            echo "verde=$verde"; echo "toca=$toca"
+          } >> "$GITHUB_OUTPUT"
+          echo "PR #$pr de $owner, commit $sha, CI ${conclusion}, toca tools/.github: $toca"
+
+      - name: Bajar artefactos de la corrida
+        if: steps.corrida.outputs.seguir == 'si' && steps.corrida.outputs.toca == 'no'
+        continue-on-error: true  # una corrida sin artefactos igual se comenta
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          path: artefactos
+          run-id: ${{ env.RUN_ID }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publicar en gh-pages
+        if: steps.corrida.outputs.seguir == 'si'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ steps.corrida.outputs.pr }}
+          SHA: ${{ steps.corrida.outputs.sha }}
+          OWNER: ${{ steps.corrida.outputs.owner }}
+          VERDE: ${{ steps.corrida.outputs.verde }}
+          TOCA: ${{ steps.corrida.outputs.toca }}
+        run: |
+          mkdir -p artefactos
+          generar() {
+            python3 tools/publicar_ranking.py --artefactos artefactos --sitio sitio \
+              --comentario comentario.md --run-id "$RUN_ID" --pr "$PR" --sha "$SHA" \
+              --repo "$REPO" --base-url "$BASE_URL" --equipo-id "$OWNER" \
+              --equipo-yaml equipo.yaml --verde "$VERDE" --toca-infra "$TOCA"
+          }
+          rm -rf sitio && mkdir sitio
+          git -C sitio init -q -b gh-pages
+          git -C sitio config user.name "jar-publicador"
+          git -C sitio config user.email "jar-publicador@users.noreply.github.com"
+          git -C sitio remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git"
+          for intento in 1 2 3 4 5; do
+            if git -C sitio fetch -q origin gh-pages 2>/dev/null; then
+              git -C sitio reset -q --hard FETCH_HEAD
+            fi
+            generar
+            git -C sitio add -A
+            git -C sitio diff --cached --quiet || git -C sitio commit -qm "ranking: corrida $RUN_ID (PR #$PR)"
+            # Sin commits: es la primera publicación y no hubo nada que publicar.
+            git -C sitio rev-parse -q --verify HEAD > /dev/null || exit 0
+            git -C sitio push -q origin HEAD:gh-pages && exit 0
+            echo "push rechazado (intento $intento): otra publicación se adelantó"
+            sleep $((RANDOM % 20 + 5))
+          done
+          echo "::error::no se pudo publicar en gh-pages después de 5 intentos"
+          exit 1
+
+      - name: Comentar el PR
+        if: steps.corrida.outputs.seguir == 'si'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ steps.corrida.outputs.pr }}
+        run: |
+          # Un solo comentario por PR, que se edita en cada corrida.
+          id=$(gh api --paginate "repos/$REPO/issues/$PR/comments" \
+            --jq '.[] | select(.user.login == "github-actions[bot]" and (.body | startswith("<!-- jar-ranking -->"))) | .id' \
+            | tail -1)
+          if [[ -n "$id" ]]; then
+            gh api -X PATCH "repos/$REPO/issues/comments/$id" -F body=@comentario.md > /dev/null
+          else
+            gh api "repos/$REPO/issues/$PR/comments" -F body=@comentario.md > /dev/null
+          fi
+          cat comentario.md >> "$GITHUB_STEP_SUMMARY"

@@ -5,7 +5,10 @@ Cómo trabajamos en este repo. El [README](../README.md) es el del template ofic
 es la fuente de verdad: si algo de acá los contradice, ganan ellos.
 
 **Fechas:** clasificación el miércoles 4 de noviembre, final el jueves 5 (Rosario).
-La organización toma el commit vigente del PR al cierre de entregas.
+La organización toma el commit vigente del PR de entrega al cierre de entregas.
+
+**En una línea:** el equipo trabaja en este repo (CHANGUITRON) con branches y PRs; cuando `main`
+tiene algo bueno, se copia al fork de entrega; el PR del fork hacia la organización es la entrega.
 
 ---
 
@@ -36,7 +39,53 @@ git remote add upstream https://github.com/AIRclub-UdeSA/jar_challenge.git
 El CI valida contra el simulador `jar2026-v1`: conviene que `yahboom_rosmaster` esté en ese tag o
 apenas después (`git -C ~/rosmaster_ws/src/yahboom_rosmaster describe --tags`).
 
-## 2. El día a día
+## 2. Los repos y cómo se conectan
+
+### Qué es un "remote"
+
+Un repo de git vive **en tu compu** (copia local) y **en GitHub** (copias en internet). Un
+*remote* es un nombre corto que tu copia local usa para referirse a un repo de GitHub:
+`git push <remote>` sube tus commits ahí, y `git pull` / `git fetch` traen los de ahí.
+
+| Remote | Repo en GitHub | Para qué | Quién lo tiene |
+| --- | --- | --- | --- |
+| `origin` | `JoacoFernandezB/CHANGUITRON---JAR-2026` | Repo de trabajo del equipo | Todos |
+| `upstream` | `AIRclub-UdeSA/jar_challenge` | Template oficial de la organización | Todos (opcional) |
+| `entrega` | `JoacoFernandezB/jar_challenge-changuitron` | Fork para la entrega | Solo quien entrega |
+
+### ¿Hay conexión entre los repos?
+
+**Entre CHANGUITRON y el fork, en GitHub, no.** Ninguno sabe del otro: si cambiás uno, el otro no
+se entera. La única conexión es una copia local que tenga a los dos como remotes: trae de uno y
+sube al otro.
+
+```text
+          GitHub                                   GitHub
+  ┌────────────────────┐                  ┌──────────────────────────┐
+  │ CHANGUITRON        │                  │ jar_challenge-changuitron│──PR──▶ AIRclub-UdeSA/
+  │ (trabajo, equipo)  │                  │ (fork, entrega)          │        jar_challenge
+  └─────────▲──────────┘                  └────────────▲─────────────┘        (oficial)
+            │ git pull origin main                     │ git push entrega main
+            │ git push origin ...                      │
+            └────────────── copia local ───────────────┘
+                     (de quien entrega, 3 remotes)
+```
+
+**El fork sí está conectado con el repo oficial:** GitHub sabe que es una copia del oficial, y por
+eso desde ahí se puede abrir el PR de entrega. Esa es la única razón por la que existe.
+
+Los dos repos comparten historia (ambos parten del template), así que pasar código de uno al otro
+con `git push` no genera conflictos.
+
+### Cómo se armó (2026-10-25)
+
+1. Se trajo el template oficial a CHANGUITRON, con su historial (paquete `equipo_jar`, launch, juez
+   de práctica, controles del CI).
+2. Se agregaron esta guía, [la propuesta de arquitectura](ARQUITECTURA.md), el `CLAUDE.md` y el
+   nombre del equipo en `equipo.yaml`.
+3. Se creó el fork `jar_challenge-changuitron` y se le subió el mismo `main`.
+
+## 3. El día a día
 
 Todos los comandos de ROS van **dentro del contenedor** (`./container.sh enter`) o en una terminal
 con Humble.
@@ -85,7 +134,7 @@ tools/verificar.sh --template --sim maze_1_6x5 # además, una corrida headless p
 hasta que lo carguemos. `verificar.sh` compila adentro del repo (`build/`, `install/`, `log/`, todo
 ignorado por git); no molesta al build del workspace.
 
-## 3. Reglas que no se negocian
+## 4. Reglas que no se negocian
 
 Romper cualquiera de estas cuesta puntos o la entrega entera:
 
@@ -110,35 +159,71 @@ Romper cualquiera de estas cuesta puntos o la entrega entera:
 - **No tocar `tools/` ni `.github/`.** La organización usa su propia copia, y un PR que los modifica
   no entra al leaderboard de práctica.
 
-## 4. Git: cómo trabajamos
+## 5. Workflow de implementación (todos)
 
-- `main` siempre compila y pasa `tools/verificar.sh`. Nadie pushea directo a `main`.
-- Una branch por tarea: `feature/localizacion`, `feature/deteccion-rojo`, `fix/qos-scan`, etc.
-- PR contra `main` de este repo, con al menos una revisión de otra persona. El workflow
-  `Validar entrega` del template corre solo en cada PR.
-- Commits chicos y con mensaje claro. No commitear `build/`, `install/`, `log/` ni rosbags.
+Todo pasa en **CHANGUITRON**. El fork no se toca. **Nadie trabaja ni pushea directo en `main`**:
+`main` siempre tiene que funcionar, porque es lo que se entrega.
 
-**Traer cambios del template oficial** (la organización lo sigue actualizando):
+```bash
+git checkout main && git pull origin main         # 1. partir de lo último
+git checkout -b feature/deteccion-rojo            # 2. una branch para tu tarea
+# ... programar, compilar, probar con simulador + juez ...
+tools/verificar.sh --template                     # 3. mismos controles que el CI
+git add -A && git commit -m "Detector de rojo"    # 4. guardar (commits chicos, mensaje claro)
+git push origin feature/deteccion-rojo            # 5. subir la branch
+```
+
+6. En GitHub, abrir un **PR de tu branch hacia `main`** de CHANGUITRON.
+7. Otra persona lo revisa, el CI (`Validar entrega`) corre solo, y si está todo bien se **mergea**.
+8. Después del merge: `git checkout main && git pull origin main` y una branch nueva para la
+   siguiente tarea.
+
+Nombres de branch: `feature/<tema>` para algo nuevo, `fix/<tema>` para un arreglo. No commitear
+`build/`, `install/`, `log/` ni rosbags.
+
+**Si `main` avanzó mientras trabajabas en tu branch**, traé esos cambios antes de abrir el PR:
+
+```bash
+git checkout main && git pull origin main
+git checkout feature/mi-tarea && git merge main
+```
+
+**Traer cambios del template oficial** (la organización lo sigue actualizando), por PR como
+cualquier otro cambio:
 
 ```bash
 git fetch upstream
-git checkout main && git merge upstream/main
+git checkout main && git pull origin main
+git checkout -b sync/template && git merge upstream/main
+git push origin sync/template                     # y PR hacia main
 ```
 
-## 5. La entrega (§9.1)
+## 6. La entrega (§9.1)
 
-La entrega es un PR desde **un fork de `AIRclub-UdeSA/jar_challenge`** hacia ese repo. Este repo no
-es un fork en GitHub, pero tiene la historia del template, así que se puede pushear tal cual:
+La entrega es un PR desde el fork **`JoacoFernandezB/jar_challenge-changuitron`** hacia
+**`AIRclub-UdeSA/jar_challenge`**. La hace una sola persona, desde una copia local con el remote
+`entrega`:
 
-1. Alguien del equipo hace *Fork* de `AIRclub-UdeSA/jar_challenge` en GitHub.
-2. `git remote add entrega git@github.com:<usuario>/jar_challenge.git`
-3. `git push entrega main`
-4. Abrir el PR hacia `AIRclub-UdeSA/jar_challenge`, título `[Equipo] CHANGUITRON`, con el checklist
-   del template completo.
-5. Desde ahí, cada vez que `main` tenga algo mejor: `git push entrega main`. El PR no se mergea:
-   la organización toma el último commit al cierre.
+```bash
+git remote add entrega git@github.com:JoacoFernandezB/jar_challenge-changuitron.git   # una vez
+```
 
-Conviene abrirlo temprano: cada push al PR corre el CI completo en los mundos de práctica y
-publica el puntaje en el [leaderboard de práctica](https://airclub-udesa.github.io/jar_challenge/).
-Antes, completar `codigo_inscripcion` en `equipo.yaml` (el CI del PR lo exige). El PR es público:
-nada de mails ni datos personales.
+Cada vez que `main` tenga una versión buena:
+
+```bash
+git checkout main && git pull origin main         # traer lo último del equipo
+git push entrega main                             # copiarlo al fork
+```
+
+- **La primera vez**, con `codigo_inscripcion` cargado en `equipo.yaml`, abrir el PR desde el fork
+  hacia `AIRclub-UdeSA/jar_challenge`, título `[Equipo] CHANGUITRON`, con el checklist del template
+  completo. Sin el código el CI del PR da rojo, y a la tabla de práctica solo entran corridas en
+  verde: no tiene sentido abrirlo antes.
+- **Las siguientes veces** alcanza con los dos comandos de arriba: el PR se actualiza solo y el CI
+  corre en los mundos de práctica, con puntaje en el
+  [leaderboard de práctica](https://airclub-udesa.github.io/jar_challenge/).
+- **El PR nunca se mergea.** Al cierre de entregas, la organización toma el último commit del fork.
+- El PR es público: nada de mails ni datos personales.
+
+**Pendiente:** el código de inscripción llega al completar el formulario de inscripción (si no
+llegó: `airclub@udesa.edu.ar`). Confirmar con la organización la fecha de cierre de entregas.

@@ -6,8 +6,9 @@ la cámara, ubicar cada caja roja en el plano y reportarla una sola vez.
 Cómo se reporta una víctima, paso a paso:
 1. La cámara ve una mancha roja: su columna en la imagen da un ángulo respecto del frente.
 2. El lidar, en esa misma dirección, da la distancia a la cara de la caja.
-3. Con la pose del robot (/odom) se pasa a coordenadas del plano y se suma medio lado de caja para
-   llegar al centro, que es lo que puntúa (§6.1).
+3. Con la pose del robot en el mapa (TF map -> base_footprint, que completa AMCL) se pasa a
+   coordenadas del plano y se suma medio lado de caja para llegar al centro, que es lo que puntúa
+   (§6.1).
 4. Se espera a ver lo mismo varias veces seguidas antes de reportar: cada reporte gasta uno (§7.2),
    puntúe o no. Una caja ya reportada no se vuelve a reportar.
 5. Al reportar las N víctimas se publica /done y el robot se detiene para siempre (§5).
@@ -21,9 +22,9 @@ Qué cambia respecto del ejemplo 1:
   rosdep: no hace falta tocar el Dockerfile.
 
 Límites que conviene conocer (es lo que mejora el equipo que sigue con los workshops):
-- Usa la odometría como si fuera el marco `map`. Anda cuando el robot arranca en el origen, pero la
-  odometría deriva y en la competencia el robot arranca cerca del origen, no exactamente en él:
-  localizarse en el mapa (workshop de la semana 06) es lo que corrige eso.
+- La pose sale de AMCL (workshop de la semana 06; ver nodo_pose_inicial.py). Si AMCL no se
+  localiza en `espera_localizacion_s`, se usa la odometría como si fuera el marco `map`, que solo
+  anda si el robot arrancó en el origen: es un respaldo para no quedarse quieto toda la corrida.
 - Sigue una pared: no recorre el laberinto de forma sistemática y puede dar vueltas en lugares
   abiertos o quedar yendo y viniendo en un recoveco (workshop de la semana 08).
 - Solo busca mientras avanza: al girar, la imagen y la odometría dejan de ser del mismo instante.
@@ -41,8 +42,10 @@ from nav_msgs.msg import OccupancyGrid, Odometry
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
+from rclpy.time import Time
 from sensor_msgs.msg import CameraInfo, Image, LaserScan
 from std_msgs.msg import Empty
+from tf2_ros import Buffer, TransformException, TransformListener
 
 from equipo_jar.deteccion import (
     angulo_de_columna, buscar_caja_roja, cerca_de_alguno, coinciden, distancia_a_la_caja,
@@ -94,6 +97,9 @@ class NodoEquipo(Node):
         self.declare_parameter('confirmaciones', 5)
         self.declare_parameter('dispersion_max_m', 0.25)
         self.declare_parameter('radio_duplicado_m', 0.60)
+        self.declare_parameter('frame_mapa', 'map')
+        self.declare_parameter('frame_robot', 'base_footprint')
+        self.declare_parameter('espera_localizacion_s', 15.0)
         # Cantidad de víctimas a buscar (N), que llega como argumento del launch (victimas:=N).
         self.declare_parameter('cantidad_victimas', 5)
         self.cantidad_victimas = self.get_parameter('cantidad_victimas').value
@@ -103,7 +109,10 @@ class NodoEquipo(Node):
         self.scan = None
         self.imagen = None
         self.info_camara = None
-        self.pose = None  # (x, y, yaw) según la odometría
+        self.pose = None       # (x, y, yaw) en el mapa; la actualiza el ciclo de control
+        self.pose_odom = None  # (x, y, yaw) según la odometría: respaldo si AMCL no anda
+        self.t_mapa = None     # cuándo (s) llegó el mapa: desde ahí corre la espera de AMCL
+        self.usando_odom = False
         self.estado = AVANZAR
         self.sentido_giro = 1         # +1 izquierda, -1 derecha
         self.derecha_anterior = None  # distancia a la pared en el ciclo anterior
@@ -123,6 +132,9 @@ class NodoEquipo(Node):
             qos_profile_sensor_data)
         # /odom es reliable: sirve la QoS por defecto.
         self.sub_odom = self.create_subscription(Odometry, '/odom', self.al_recibir_odom, 10)
+        # La pose en el mapa se lee de TF: AMCL publica map -> odom y el robot odom -> base.
+        self.tf_buffer = Buffer()
+        self.tf_listener = TransformListener(self.tf_buffer, self)
 
         self.pub_cmd_vel = self.create_publisher(Twist, '/cmd_vel', 10)
         self.pub_victimas = self.create_publisher(PointStamped, '/victimas', 10)
@@ -140,6 +152,8 @@ class NodoEquipo(Node):
             self.get_logger().info(
                 f'Mapa recibido: {mapa.info.width}x{mapa.info.height} celdas, '
                 f'resolución {mapa.info.resolution:.3f} m')
+        if self.t_mapa is None:
+            self.t_mapa = self.get_clock().now().nanoseconds * 1e-9
         self.mapa = mapa
 
     def al_recibir_scan(self, scan):
@@ -153,13 +167,42 @@ class NodoEquipo(Node):
 
     def al_recibir_odom(self, odom):
         p, q = odom.pose.pose.position, odom.pose.pose.orientation
-        self.pose = (p.x, p.y, yaw_de_cuaternion(q.x, q.y, q.z, q.w))
+        self.pose_odom = (p.x, p.y, yaw_de_cuaternion(q.x, q.y, q.z, q.w))
+
+    def pose_en_el_mapa(self):
+        """(x, y, yaw) del robot en el mapa según AMCL, o None si todavía no se localizó."""
+        try:
+            tf = self.tf_buffer.lookup_transform(
+                self.get_parameter('frame_mapa').value,
+                self.get_parameter('frame_robot').value, Time())
+        except TransformException:
+            return None
+        t, q = tf.transform.translation, tf.transform.rotation
+        return t.x, t.y, yaw_de_cuaternion(q.x, q.y, q.z, q.w)
+
+    def actualizar_pose(self):
+        """La pose de AMCL; si no llega en `espera_localizacion_s` desde el mapa, la odometría."""
+        pose = self.pose_en_el_mapa()
+        if pose is not None:
+            if self.usando_odom:
+                self.get_logger().info('AMCL localizado: dejo de usar la odometría')
+                self.usando_odom = False
+            self.pose = pose
+            return
+        ahora = self.get_clock().now().nanoseconds * 1e-9
+        if self.usando_odom or ahora - self.t_mapa > self.get_parameter(
+                'espera_localizacion_s').value:
+            if not self.usando_odom:
+                self.get_logger().warn('AMCL no se localizó a tiempo: uso la odometría como mapa')
+                self.usando_odom = True
+            self.pose = self.pose_odom
 
     # --- Control: se ejecuta a frecuencia_control_hz ----------------------------------------
 
     def ciclo_de_control(self):
         if self.mapa is None:
             return  # esperar el mapa: no mover el robot ni reportar antes (§5)
+        self.actualizar_pose()
         if self.estado == TERMINADO or self.scan is None or self.pose is None:
             self.pub_cmd_vel.publish(Twist())  # después de /done el robot no se vuelve a mover
             return

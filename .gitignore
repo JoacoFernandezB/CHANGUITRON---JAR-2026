@@ -22,3 +22,6 @@ htmlcov/
 # Salidas de pruebas locales (rosbags, resultados del juez de práctica)
 rosbag2_*/
 resultado*.json
+
+# Corridas de scripts/probar.sh (logs, gráficos e historial local)
+pruebas/

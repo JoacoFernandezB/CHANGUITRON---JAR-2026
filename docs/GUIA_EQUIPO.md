@@ -119,6 +119,27 @@ python3 tools/juez.py --mundo maze_1_6x5 --mapa $SIM/maps/maze_1_6x5.yaml --grou
 ros2 launch equipo_jar competencia.launch.py use_sim_time:=true victimas:=N
 ```
 
+**Prueba rápida con un solo comando** (hace lo mismo que las tres terminales, mide y guarda):
+
+```bash
+cd ~/rosmaster_ws/src/CHANGUITRON---JAR-2026
+scripts/probar.sh --nota "qué cambié"            # maze_1_6x5, 300 s, arranque corrido
+scripts/probar.sh --mapa maze_3_6x6 --tiempo 600 # otro mapa, corrida completa de 10 min
+scripts/probar.sh --ventana                      # con Gazebo y RViz para mirar
+scripts/probar.sh --help                         # todas las opciones
+python3 scripts/historial.py --historial pruebas/historial.csv   # ver corridas anteriores
+```
+
+Compila `equipo_jar`, levanta el simulador sin ventana (o con `--ventana`), el juez con puntaje y
+nuestro launch, y mientras corre muestra solo los mensajes importantes (mapa, localización,
+víctimas). Al final imprime el puntaje, la distancia de cada reporte y **el error de la
+localización contra la pose real** (cuánto tarda AMCL en converger, error medio y máximo después),
+y suma una línea a `pruebas/historial.csv` con el commit y la nota: así se ve si un cambio mejoró o
+empeoró. Logs y `grafico.png` de cada corrida en `pruebas/<fecha>_<mapa>/` (ignorado por git).
+
+La medición usa `/ground_truth/odom`, que solo existe en el simulador: por eso vive en
+`scripts/` y no en `src/`. Nuestro software nunca lo usa (§7.1).
+
 Mapas de práctica: `laberinto_simple`, `laberinto_1`, `maze_1_6x5`, `maze_2_6x5`, `maze_3_6x6`,
 `maze_4_metal_6x6`. Probá en **todos**: en Rosario el laberinto es otro.
 

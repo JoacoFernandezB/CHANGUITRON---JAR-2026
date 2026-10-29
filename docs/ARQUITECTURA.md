@@ -1,8 +1,34 @@
-# Arquitectura (propuesta, a decidir en equipo)
+# Arquitectura
 
-El template trae un solo nodo esqueleto (`nodo_equipo`) que espera `/map` y no hace nada más.
-Este documento propone cómo partir el problema para trabajar en paralelo. **Nada de esto está
-decidido todavía**: la primera tarea del equipo es elegir la opción de navegación (sección 2).
+Este documento propone cómo partir el problema para trabajar en paralelo. Lo que ya está hecho
+figura en la sección 0; el resto sigue siendo propuesta.
+
+## 0. Estado actual
+
+| Módulo | Estado | Cómo |
+| --- | --- | --- |
+| **Localización** | ✅ **Hecho** (PR #2) | AMCL (`nav2_amcl`) + `nodo_pose_inicial` |
+| **Percepción** | Base del ejemplo 2 de la organización (PR #1) | `deteccion.py`, dentro de `nodo_equipo` |
+| **Navegación** | Base del ejemplo 1: seguir la pared derecha | `evasion.py`, dentro de `nodo_equipo` |
+| **Misión** | Parcial: reporta y publica `/done` al llegar a N; **no vuelve a la largada** | `nodo_equipo` |
+
+### Localización (hecho)
+
+- **AMCL** compara el `/scan` con `/map` y publica TF `map → odom`. Lo activa
+  `lifecycle_manager_localizacion` (AMCL es un nodo con ciclo de vida de Nav2).
+- **`nodo_pose_inicial`**, al recibir `/map`, manda por `/initialpose` (topic interno) una
+  gaussiana centrada en el origen (σ en `params.yaml`). Se usa en lugar de `set_initial_pose` de
+  AMCL, que arranca todas las partículas en el mismo punto (covarianza cero).
+- **`nodo_equipo`** lee la pose de TF `map → base_footprint`. Si AMCL no se localiza en
+  `espera_localizacion_s` desde el mapa, usa `/odom` como respaldo y lo avisa en el log.
+- **Medido en simulación** (`maze_1_6x5`, arranque en (0,2, −0,15) girado 0,3 rad): error de AMCL
+  de 0,02 a 0,16 m y menos de 2°; `/odom` acumulaba 0,9 m y 17°. Reporte de V1 a 0,15 m del
+  centro de la caja (100 puntos).
+- **Para ajustar entre corridas** (son hiperparámetros): `alpha1` y `alpha2` (cuánto se desconfía
+  del giro de las ruedas: subirlos si en el robot real la pose salta al girar), las σ de
+  `nodo_pose_inicial` y `z_rand` (tolerancia a ventanas y a obstáculos que no están en el mapa).
+- **Pendiente:** confirmar con el bag de la semana 10 que el robot real publica TF
+  `odom → base_footprint` (el simulador sí; el contrato del robot real dice los mismos frames).
 
 ## 1. Módulos
 
@@ -10,7 +36,7 @@ La misión (§1 del reglamento) se parte en cuatro problemas casi independientes
 
 | Módulo | Qué resuelve | Entra | Sale | Base de los workshops |
 | --- | --- | --- | --- | --- |
-| **Localización** | Dónde estoy en `/map`, arrancando *cerca* del origen | `/map`, `/scan`, `/odom` | TF `map → odom` | 06 (filtro de partículas) o AMCL (09) |
+| **Localización** ✅ | Dónde estoy en `/map`, arrancando *cerca* del origen | `/map`, `/scan`, `/odom` | TF `map → odom` | AMCL (09), ver sección 0 |
 | **Percepción** | Ver cajas rojas y estimar su centro en `map` | cámara, `/scan`, TF | candidatos de víctima (topic interno) | 04 (`detector`, `detector_scan`) |
 | **Navegación** | Ir a un punto sin chocar, incluidos obstáculos que no están en el mapa | `/map`, `/scan`, pose | `/cmd_vel` | 07 + 08 (A*) o Nav2 (09) |
 | **Misión** | Qué recorrer, cuándo reportar, cuándo volver y publicar `/done` | todo lo anterior | `/victimas`, `/done`, metas | 08 (`explorador`, cobertura) |
@@ -28,7 +54,7 @@ Contratos a respetar entre módulos:
 
 | | **A. Nav2** (workshop 09) | **B. Propia** (workshops 06–08) |
 | --- | --- | --- |
-| Localización | AMCL, probado y robusto | nuestro filtro de partículas (ya anda en sim) |
+| Localización | AMCL, probado y robusto | **ya resuelto con AMCL** en las dos opciones (sección 0) |
 | Obstáculos no mapeados | los ve el costmap local solo | hay que detectarlos y replanificar a mano (07) |
 | Esfuerzo hasta "anda" | bajo: configurar YAML | alto: planificador + control + recuperación |
 | Entender qué falla | difícil: muchas piezas y parámetros | fácil: es nuestro código |

@@ -35,3 +35,61 @@ nodo_equipo:
     confirmaciones: 5               # vistas seguidas que tienen que coincidir para reportar
     dispersion_max_m: 0.25          # cuánto pueden diferir esas vistas entre sí (m)
     radio_duplicado_m: 0.60         # a menos de esto de una víctima ya reportada, es la misma
+    # Localización (workshop de la semana 06): de dónde sale la pose en el mapa.
+    frame_mapa: map
+    frame_robot: base_footprint
+    espera_localizacion_s: 15.0     # sin AMCL después de esto (s) desde el mapa, se usa /odom
+
+# Pose inicial que se le da a AMCL: una gaussiana centrada en el origen del mapa, donde arranca
+# el robot (§1). Las sigmas son cuánto puede estar corrido el robot de ahí.
+nodo_pose_inicial:
+  ros__parameters:
+    sigma_xy_inicial_m: 0.15        # desvío en x e y (m)
+    sigma_yaw_inicial_deg: 10.0     # desvío del ángulo (grados)
+    periodo_pose_inicial_s: 1.0     # cada cuánto se reintenta hasta que AMCL se localiza
+    frame_mapa: map
+    frame_odom: odom
+
+# AMCL (nav2_amcl): filtro de partículas que compara el lidar con /map y publica map -> odom.
+# Los alpha son el ruido que se le supone a la odometría; si el robot real gira peor de lo que
+# dice /odom, subir alpha1 (giro que genera más giro) y alpha2 (avance que genera giro).
+amcl:
+  ros__parameters:
+    robot_model_type: nav2_amcl::OmniMotionModel  # mecanum: también se mueve de costado
+    alpha1: 0.4                     # ruido de giro por giro
+    alpha2: 0.2                     # ruido de giro por avance
+    alpha3: 0.2                     # ruido de avance por avance
+    alpha4: 0.2                     # ruido de avance por giro
+    alpha5: 0.2                     # ruido del desplazamiento lateral (solo omni)
+    base_frame_id: base_footprint
+    odom_frame_id: odom
+    global_frame_id: map
+    scan_topic: scan
+    map_topic: map
+    set_initial_pose: false         # la manda nodo_pose_inicial, con covarianza
+    tf_broadcast: true
+    transform_tolerance: 0.5        # s
+    laser_model_type: likelihood_field
+    laser_max_range: -1.0           # -1: usar el rango que informa el /scan
+    laser_min_range: -1.0
+    laser_likelihood_max_dist: 2.0
+    max_beams: 60                   # rayos del scan que se usan por actualización
+    z_hit: 0.5
+    z_rand: 0.5                     # alto: tolera ventanas y obstáculos que no están en el mapa
+    sigma_hit: 0.2
+    min_particles: 500
+    max_particles: 2000
+    pf_err: 0.05
+    pf_z: 0.99
+    update_min_d: 0.10              # se actualiza cada 10 cm de avance...
+    update_min_a: 0.15              # ...o cada 0,15 rad de giro
+    resample_interval: 1
+    recovery_alpha_slow: 0.0
+    recovery_alpha_fast: 0.0
+    save_pose_rate: 0.5
+
+# Lifecycle manager: AMCL es un nodo con ciclo de vida (Nav2) y alguien tiene que activarlo.
+lifecycle_manager_localizacion:
+  ros__parameters:
+    autostart: true
+    node_names: [amcl]

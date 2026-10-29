@@ -44,6 +44,30 @@ def generate_launch_description():
                 'cantidad_victimas': ParameterValue(victimas, value_type=int),
             }],
         ),
-        # Acá se agregan el resto de los nodos del equipo (localización,
-        # navegación, percepción...). Todos con el mismo `parameters=[params, ...]`.
+        # Localización: AMCL compara el lidar con /map y publica map -> odom. Es un nodo con
+        # ciclo de vida (Nav2): el lifecycle manager lo activa. nodo_pose_inicial le da la
+        # pose de arranque (una gaussiana en el origen) cuando llega el mapa.
+        Node(
+            package='nav2_amcl',
+            executable='amcl',
+            name='amcl',
+            output='screen',
+            parameters=[params, {'use_sim_time': use_sim_time}],
+        ),
+        Node(
+            package='nav2_lifecycle_manager',
+            executable='lifecycle_manager',
+            name='lifecycle_manager_localizacion',
+            output='screen',
+            parameters=[params, {'use_sim_time': use_sim_time}],
+        ),
+        Node(
+            package='equipo_jar',
+            executable='nodo_pose_inicial',
+            name='nodo_pose_inicial',
+            output='screen',
+            parameters=[params, {'use_sim_time': use_sim_time}],
+        ),
+        # Acá se agregan el resto de los nodos del equipo (navegación, percepción...).
+        # Todos con el mismo `parameters=[params, ...]`.
     ])

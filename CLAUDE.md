@@ -20,10 +20,13 @@ Contexto compartido del equipo para Claude Code. Si algo acá contradice al
     `use_sim_time`. Todos los nodos van acá, con `parameters=[params, {...use_sim_time...}]`.
   - `params/`: solo valores generales (umbrales, ganancias, velocidades, rangos de color).
   - `equipo_jar/reportes.py`: `armar_reporte(x, y, stamp)`; usarlo siempre para `/victimas`.
-  - `equipo_jar/nodo_equipo.py`: nodo esqueleto que espera `/map`.
+  - `equipo_jar/nodo_equipo.py`: sigue la pared, detecta cajas rojas y reporta (base: ejemplos 1
+    y 2 de la organización). Lee la pose de TF `map → base_footprint`.
+  - Localización (hecha): AMCL + `lifecycle_manager_localizacion` + `nodo_pose_inicial.py`
+    (gaussiana en el origen por `/initialpose`). Detalle en `docs/ARQUITECTURA.md` §0.
 - `tools/`, `.github/`: controles y CI de la organización. **No modificarlos.**
-- `docs/GUIA_EQUIPO.md` (flujo de trabajo y entrega), `docs/ARQUITECTURA.md` (módulos, Nav2 vs.
-  navegación propia: decisión pendiente), `docs/QOS.md` (QoS de cada topic).
+- `docs/GUIA_EQUIPO.md` (flujo de trabajo y entrega), `docs/ARQUITECTURA.md` (estado de cada
+  módulo; navegación y exploración: pendientes), `docs/QOS.md` (QoS de cada topic).
 
 ## Reglas que no se negocian
 

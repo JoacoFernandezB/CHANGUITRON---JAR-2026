@@ -25,6 +25,7 @@ setup(
         'console_scripts': [
             'nodo_equipo = equipo_jar.nodo_equipo:main',
             'nodo_pose_inicial = equipo_jar.nodo_pose_inicial:main',
+            'nodo_percepcion = equipo_jar.nodo_percepcion:main',
         ],
     },
 )

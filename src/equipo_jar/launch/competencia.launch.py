@@ -68,6 +68,14 @@ def generate_launch_description():
             output='screen',
             parameters=[params, {'use_sim_time': use_sim_time}],
         ),
-        # Acá se agregan el resto de los nodos del equipo (navegación, percepción...).
+        # Percepción: busca las cajas rojas y publica las confirmadas en /equipo/cajas_confirmadas.
+        Node(
+            package='equipo_jar',
+            executable='nodo_percepcion',
+            name='nodo_percepcion',
+            output='screen',
+            parameters=[params, {'use_sim_time': use_sim_time}],
+        ),
+        # Acá se agregan el resto de los nodos del equipo (navegación, misión...).
         # Todos con el mismo `parameters=[params, ...]`.
     ])

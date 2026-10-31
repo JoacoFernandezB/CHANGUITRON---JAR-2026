@@ -21,7 +21,18 @@ nodo_equipo:
     memoria_pared_s: 2.0            # cuánto se recuerda (s) que la pared de la derecha se terminó
     ganancia_pared: 2.0             # cuánto corrige el giro por cada metro de error
     amortiguacion_pared: 4.0        # cuánto frena la corrección según qué tan rápido cambia el error
-    # Detectar las cajas rojas (workshop de la semana 04).
+
+    # Localización (workshop de la semana 06): de dónde sale la pose en el mapa.
+    frame_mapa: map
+    frame_robot: base_footprint
+    espera_localizacion_s: 15.0     # sin AMCL después de esto (s) desde el mapa, se usa /odom
+
+# Percepción: encontrar las cajas rojas y ubicarlas en el mapa (workshop de la semana 04).
+nodo_percepcion:
+  ros__parameters:
+    frecuencia_hz: 10.0
+    angulo_frente_deg: 180.0        # el frente del robot en el /scan (el lidar simulado está al revés)
+    velocidad_lineal_min_deteccion: 0.05  # m/s: más lento que esto (girando en el lugar) no se mira
     saturacion_min: 120             # S mínima (0-255) para contar un píxel como rojo
     valor_min: 80                   # V mínimo (0-255)
     area_minima_px: 400.0           # una mancha roja más chica que esto (px) se descarta
@@ -34,11 +45,9 @@ nodo_equipo:
     tolerancia_distancia: 0.25      # cuánto pueden diferir (fracción) la distancia del lidar y la de la imagen
     confirmaciones: 5               # vistas seguidas que tienen que coincidir para reportar
     dispersion_max_m: 0.25          # cuánto pueden diferir esas vistas entre sí (m)
-    radio_duplicado_m: 0.60         # a menos de esto de una víctima ya reportada, es la misma
-    # Localización (workshop de la semana 06): de dónde sale la pose en el mapa.
+    radio_duplicado_m: 0.60         # a menos de esto de una caja ya confirmada, es la misma
     frame_mapa: map
     frame_robot: base_footprint
-    espera_localizacion_s: 15.0     # sin AMCL después de esto (s) desde el mapa, se usa /odom
 
 # Pose inicial que se le da a AMCL: una gaussiana centrada en el origen del mapa, donde arranca
 # el robot (§1). Las sigmas son cuánto puede estar corrido el robot de ahí.

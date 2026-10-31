@@ -56,6 +56,8 @@ nodo_pose_inicial:
     sigma_xy_inicial_m: 0.15        # desvío en x e y (m)
     sigma_yaw_inicial_deg: 10.0     # desvío del ángulo (grados)
     periodo_pose_inicial_s: 1.0     # cada cuánto se reintenta hasta que AMCL se localiza
+    actualizaciones_sin_movimiento: 10  # después, cuántas veces se le pide a AMCL que corrija quieto
+    periodo_actualizacion_s: 0.3    # cada cuánto (s): ~3 s en total, alcanza para varios scans
     frame_mapa: map
     frame_odom: odom
 
@@ -102,3 +104,4 @@ lifecycle_manager_localizacion:
   ros__parameters:
     autostart: true
     node_names: [amcl]
+    bond_timeout: 10.0              # s sin noticias de AMCL antes de bajarlo (4 por defecto: en una compu lenta lo bajaba)

@@ -20,13 +20,16 @@ Contexto compartido del equipo para Claude Code. Si algo acá contradice al
     `use_sim_time`. Todos los nodos van acá, con `parameters=[params, {...use_sim_time...}]`.
   - `params/`: solo valores generales (umbrales, ganancias, velocidades, rangos de color).
   - `equipo_jar/reportes.py`: `armar_reporte(x, y, stamp)`; usarlo siempre para `/victimas`.
-  - `equipo_jar/nodo_equipo.py`: sigue la pared, detecta cajas rojas y reporta (base: ejemplos 1
-    y 2 de la organización). Lee la pose de TF `map → base_footprint`.
-  - Localización (hecha): AMCL + `lifecycle_manager_localizacion` + `nodo_pose_inicial.py`
-    (gaussiana en el origen por `/initialpose`). Detalle en `docs/ARQUITECTURA.md` §0.
+  - `equipo_jar/nodo_mision.py`: elige metas (`cobertura.py`), manda a Nav2, sale de las trabas
+    (`escape.py`), reporta y vuelve. Único dueño de `/cmd_vel` y `/victimas`.
+  - `equipo_jar/nodo_equipo.py`: seguidor de pared del ejemplo. **Ya no se lanza.**
+  - Navegación (hecha): Nav2 con Smac y RPP, activado por `nodo_arranque.py`. Su velocidad pasa por
+    `/equipo/cmd_vel_nav` y `nodo_mision` la deja llegar a `/cmd_vel`.
+  - Localización (hecha): AMCL + `nodo_arranque.py` + `nodo_pose_inicial.py` (gaussiana en el
+    origen por `/initialpose`). Detalle en `docs/ARQUITECTURA.md` §0.
 - `tools/`, `.github/`: controles y CI de la organización. **No modificarlos.**
 - `docs/GUIA_EQUIPO.md` (flujo de trabajo y entrega), `docs/ARQUITECTURA.md` (estado de cada
-  módulo; navegación y exploración: pendientes), `docs/QOS.md` (QoS de cada topic).
+  módulo), `docs/QOS.md` (QoS de cada topic).
 
 ## Reglas que no se negocian
 

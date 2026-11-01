@@ -2,8 +2,7 @@
 
 Mira la cámara y el lidar, ubica cada caja roja en el marco `map` y, cuando la vio varias veces en
 el mismo lugar, la publica UNA vez en el topic interno /equipo/cajas_confirmadas. No reporta: el
-único que publica en /victimas es nodo_equipo (más adelante, el nodo de misión), que lleva la
-cuenta de los N reportes (§7.2).
+único que publica en /victimas es nodo_mision, que lleva la cuenta de los N reportes (§7.2).
 
 Cómo se ubica una caja (las cuentas están en deteccion.py, sin ROS y con tests):
 1. La cámara ve una mancha roja con forma de caja (descarta otros colores, hilos y manchas
@@ -21,12 +20,14 @@ corrección buena de AMCL + /odom (respaldo) cuando AMCL salta, deriva o deja de
 se toma en el instante de la imagen (TF odom -> base_footprint con el stamp de la imagen), no en
 el de ahora: la imagen llega con unas decenas de ms de atraso.
 
-Solo se mira mientras el robot avanza y no gira demasiado rápido. Girando, la imagen y el scan
-no son del mismo instante: el robot sigue la pared girando casi todo el tiempo, así que en vez de
-no mirar se corrige el sector del lidar por lo que giró el robot entre el rayo y la imagen (TF
-odom -> base_footprint en los dos instantes).
+Se mira también con el robot quieto: nodo_mision frena unos segundos frente a cada objeto para
+mirarlo, y quieto la imagen, el scan y la pose son del mismo instante (es la mejor vista). No se
+mira girando más rápido que giro_max_deteccion. Por debajo de eso, la imagen y el scan no son del
+mismo instante, así que se corrige el sector del lidar por lo que giró el robot entre el rayo y la
+imagen (TF odom -> base_footprint en los dos instantes).
 """
 import math
+import traceback
 from dataclasses import fields
 
 import rclpy
@@ -42,9 +43,9 @@ from tf2_ros import Buffer, TransformException, TransformListener
 
 from equipo_jar.agrupador import AgrupadorCajas
 from equipo_jar.deteccion import (
-    FiltroColor, FiltroForma, angulo_de_columna, apoyada_en_el_piso, buscar_caja_roja, coinciden,
-    distancia_por_altura, hay_algo_delante, mediana_del_tramo, profundidad, tramo_del_lidar,
-    yaw_de_cuaternion)
+    FiltroColor, FiltroForma, angulo_de_columna, apoyada_en_el_piso, buscar_cajas_rojas,
+    coinciden, distancia_por_altura, frente_del_lidar, hay_algo_delante, mediana_del_tramo,
+    profundidad, tramo_del_lidar, yaw_de_cuaternion)
 from equipo_jar.evasion import normalizar_angulo
 from equipo_jar.geometria import componer, de_robot_a_mapa
 from equipo_jar.mapa import GrillaMapa
@@ -67,7 +68,7 @@ PARAMETROS = {
     'frecuencia_hz': 10.0,
     'angulo_frente_deg': 180.0,
     # Cuándo se mira
-    'velocidad_lineal_min_deteccion': 0.05,
+    'velocidad_lineal_min_deteccion': 0.0,
     'giro_max_deteccion': 0.7,
     # Color (deteccion.FiltroColor)
     'saturacion_min': 120,
@@ -147,6 +148,7 @@ class NodoPercepcion(Node):
         self.estado_anterior = None
         self.giro_scan_deg = 0.0      # cuánto giró el robot entre el rayo del lidar y la imagen
         self.lidar_en_robot = None    # (x, y) del lidar en base_footprint, de TF
+        self.frente_lidar_deg = None  # ángulo del /scan que apunta al frente, de TF
         self.altura_camara = None     # altura (m) de la cámara sobre el piso, de TF
 
         self.sub_mapa = self.create_subscription(
@@ -231,6 +233,7 @@ class NodoPercepcion(Node):
             tf = self.transformada(robot, self.scan.header.frame_id)
             if tf is not None:
                 self.lidar_en_robot = (tf.transform.translation.x, tf.transform.translation.y)
+                self.leer_frente_del_lidar(tf.transform.rotation)
         if self.altura_camara is None and self.info_camara is not None:
             tf = self.transformada(robot, self.info_camara.header.frame_id)
             if tf is not None:
@@ -239,9 +242,45 @@ class NodoPercepcion(Node):
                     f'Cámara a {self.altura_camara:.3f} m del piso; lidar en '
                     f'{self.lidar_en_robot} respecto de {robot}')
 
+    def leer_frente_del_lidar(self, q):
+        """Hacia dónde mira el lidar, de TF (el URDF). nodo_mision también lo toma de TF: así, si
+        en el robot real el lidar está montado distinto, los dos se enteran solos."""
+        frente, derecho = frente_del_lidar(q.x, q.y, q.z, q.w)
+        param = self.p('angulo_frente_deg')
+        if not derecho:
+            self.get_logger().error(
+                f'El lidar está dado vuelta o inclinado según TF: uso angulo_frente_deg '
+                f'({param:.0f}°), revisalo')
+            return
+        self.frente_lidar_deg = frente
+        diferencia = abs(math.degrees(normalizar_angulo(math.radians(frente - param))))
+        if diferencia > 1.0:
+            self.get_logger().warn(
+                f'Según TF, el frente del lidar está a {frente:.0f}° en el /scan y '
+                f'angulo_frente_deg dice {param:.0f}°: uso el de TF')
+        else:
+            self.get_logger().info(f'Frente del lidar (TF): {frente:.0f}° en el /scan')
+
+    def frente_deg(self):
+        """Ángulo del /scan que apunta al frente: de TF, o el parámetro si TF todavía no está."""
+        if self.frente_lidar_deg is not None:
+            return self.frente_lidar_deg
+        return self.p('angulo_frente_deg')
+
     # --- Ciclo: se ejecuta a frecuencia_hz --------------------------------------------------
 
     def ciclo(self):
+        """Un error en un ciclo no puede matar el nodo: sin percepción, el resto de la corrida
+        no se encuentra ninguna caja. Se loguea (con el traceback, para arreglarlo) y se sigue
+        con la imagen siguiente."""
+        try:
+            self.paso()
+        except Exception:  # a propósito: cualquier error
+            self.get_logger().error(
+                f'Error en el ciclo de percepción, sigo con el próximo:\n{traceback.format_exc()}',
+                throttle_duration_sec=5.0)
+
+    def paso(self):
         if self.mapa is None:
             return  # nada antes del mapa (§5)
         self.geometria_del_robot()
@@ -257,27 +296,39 @@ class NodoPercepcion(Node):
         lineal, giro = self.velocidad
         if (lineal < self.p('velocidad_lineal_min_deteccion')
                 or abs(giro) > self.p('giro_max_deteccion')):
-            return  # quieto o girando: la imagen y la pose no son del mismo instante
+            return  # girando rápido, la imagen y el scan no son del mismo instante
         if self.imagen is None or self.stamp_imagen == self.stamp_procesado:
             return  # la misma imagen del ciclo anterior no es una vista nueva
+        if self.info_camara is None or self.scan is None or len(self.scan.ranges) == 0:
+            return  # faltan datos de la cámara o del lidar
         self.stamp_procesado = self.stamp_imagen
 
         # La pose en el instante de la imagen. Si TF todavía no tiene ese instante, la última.
         odom_imagen = self.pose_tf(
             self.p('frame_odom'), self.p('frame_robot'), Time.from_msg(self.stamp_imagen)) or odom
         pose = componer(estado.correccion, odom_imagen)
-        punto, motivo = self.ubicar_caja_roja(pose, odom_imagen[2])
-        if punto is None:
-            if self.p('log_descartes') and motivo != 'no hay rojo':
-                self.get_logger().info(f'Descarto: {motivo}', throttle_duration_sec=1.0)
-            return
 
-        centro = self.agrupador.agregar(punto, ahora)
-        if centro is not None:
-            self.publicar_caja(*centro)
-            self.get_logger().info(
-                f'Caja {len(self.agrupador.confirmadas)} confirmada en '
-                f'({centro[0]:.2f}, {centro[1]:.2f}) con pose de {estado.fuente}')
+        # Cada mancha con forma de caja se ubica por separado: puede haber más de una caja.
+        manchas, motivo = buscar_cajas_rojas(self.imagen, self.color, self.forma)
+        puntos = []
+        for mancha in manchas:
+            punto, motivo_mancha = self.ubicar_caja_roja(mancha, pose, odom_imagen[2])
+            if punto is None:
+                motivo = motivo or motivo_mancha  # se loguea el de la mancha más grande
+                continue
+            # Dos pedazos de la misma caja (partida por algo delante) son una sola vista.
+            if not any(math.dist(punto, otro) < self.p('radio_grupo_m') for otro in puntos):
+                puntos.append(punto)
+        if motivo is not None and motivo != 'no hay rojo' and self.p('log_descartes'):
+            self.get_logger().info(f'Descarto: {motivo}', throttle_duration_sec=1.0)
+
+        for punto in puntos:
+            centro = self.agrupador.agregar(punto, ahora)
+            if centro is not None:
+                self.publicar_caja(*centro)
+                self.get_logger().info(
+                    f'Caja {len(self.agrupador.confirmadas)} confirmada en '
+                    f'({centro[0]:.2f}, {centro[1]:.2f}) con pose de {estado.fuente}')
 
     def informar(self, estado):
         """Loguea los cambios de fuente de la pose. Al cambiar, las vistas sin confirmar se
@@ -298,7 +349,7 @@ class NodoPercepcion(Node):
         """Rayos del lidar entre dos ángulos vistos desde la imagen (corregidos por el giro)."""
         s = self.scan
         return tramo_del_lidar(s.ranges, s.angle_min, s.angle_increment,
-                               self.p('angulo_frente_deg'), desde_deg + self.giro_scan_deg,
+                               self.frente_deg(), desde_deg + self.giro_scan_deg,
                                hasta_deg + self.giro_scan_deg, s.range_min, s.range_max)
 
     def giro_desde_el_scan(self, angulo_deg, yaw_odom_imagen):
@@ -312,7 +363,7 @@ class NodoPercepcion(Node):
         s = self.scan
         tiempo = Time.from_msg(s.header.stamp)
         if s.time_increment > 0.0 and s.angle_increment > 0.0:
-            desde_min = math.radians(self.p('angulo_frente_deg') + angulo_deg) - s.angle_min
+            desde_min = math.radians(self.frente_deg() + angulo_deg) - s.angle_min
             i = int(round((desde_min % (2.0 * math.pi)) / s.angle_increment)) % len(s.ranges)
             tiempo = Time(nanoseconds=tiempo.nanoseconds + int(i * s.time_increment * 1e9))
         odom_rayo = self.pose_tf(self.p('frame_odom'), self.p('frame_robot'), tiempo)
@@ -320,13 +371,8 @@ class NodoPercepcion(Node):
             return 0.0
         return math.degrees(normalizar_angulo(yaw_odom_imagen - odom_rayo[2]))
 
-    def ubicar_caja_roja(self, pose, yaw_odom_imagen):
-        """(Posición (x, y) del centro de la caja roja que se ve ahora, None), o (None, motivo)."""
-        if self.info_camara is None or self.scan is None:
-            return None, 'faltan datos de la cámara o del lidar'
-        mancha, motivo = buscar_caja_roja(self.imagen, self.color, self.forma)
-        if mancha is None:
-            return None, motivo
+    def ubicar_caja_roja(self, mancha, pose, yaw_odom_imagen):
+        """(Posición (x, y) del centro de la caja de esta mancha, None), o (None, motivo)."""
         k = self.info_camara.k
         fx, cx, fy, cy = k[0], k[2], k[4], k[5]
 

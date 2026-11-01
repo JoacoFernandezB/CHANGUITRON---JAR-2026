@@ -67,7 +67,14 @@ figura en la sección 0; el resto sigue siendo propuesta.
 ### Percepción
 
 `nodo_percepcion` publica cada caja una sola vez en `/equipo/cajas_confirmadas`; `nodo_mision` la
-reporta (descarta las que llegan antes de que, según su propia espera, AMCL haya convergido). La lógica está en módulos puros con tests:
+reporta (las que llegan antes de que, según su propia espera, AMCL haya convergido quedan en
+espera y se reportan después; tras `/done` no reporta más). Percepción mira también con el robot
+quieto (`velocidad_lineal_min_deteccion: 0.0`), que es cuando `nodo_mision` frena frente a un
+objeto para inspeccionarlo; no mira girando a más de `giro_max_deteccion`. Ubica cada mancha
+con forma de caja de la imagen, no solo la más grande (si no, una caja ya confirmada tapaba a
+las demás). Hacia dónde mira el lidar sale de TF, como en `nodo_mision` (`angulo_frente_deg`
+queda solo de respaldo). Un error en un ciclo se loguea con su traceback y el nodo sigue. La
+lógica está en módulos puros con tests:
 
 - **`deteccion.py`**: color (HSV con límites de H para no tomar naranjas ni magentas, y limpieza
   de bordes finos), forma (relleno y proporción de caja, sin tocar ningún borde de la imagen),
@@ -87,9 +94,9 @@ reporta (descarta las que llegan antes de que, según su propia espera, AMCL hay
   ubicar cajas espera a que AMCL converja (covarianza de `/amcl_pose`, o 2 m avanzados).
 
 **Pendiente:** `nodo_mision` decide por su cuenta cuándo AMCL convergió (se movió 0,6 m y esperó
-8 s) y `nodo_percepcion` por el supervisor: conviene que decida uno solo, para que no se pierdan
-cajas. Y cuando AMCL se pierde, se lo podría reinicializar por `/initialpose`
-con la pose del respaldo (es tema de localización).
+8 s) y `nodo_percepcion` por el supervisor: conviene que decida uno solo. Las cajas que llegan
+antes ya no se pierden (quedan en espera), pero se reportan tarde. Y cuando AMCL se pierde, se
+lo podría reinicializar por `/initialpose` con la pose del respaldo (es tema de localización).
 
 ## 1. Módulos
 

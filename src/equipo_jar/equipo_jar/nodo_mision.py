@@ -95,6 +95,7 @@ class NodoMision(Node):
         self.ultimo_visto = 0.0
         self.ultimo_objetos = 0.0
         self.confirmadas = []
+        self.cajas_en_espera = []       # llegaron antes de que AMCL convergiera
         self.reportes = 0
         self.inspeccionados = []
         self.pendientes = []
@@ -170,8 +171,16 @@ class NodoMision(Node):
     def al_recibir_caja(self, caja):
         x, y = caja.point.x, caja.point.y
         if self.t_convergencia is None or self.ahora() < self.t_convergencia:
-            self.get_logger().warn(f'caja ignorada: AMCL sin converger ({x:.2f}, {y:.2f})')
+            # Percepción solo publica con su supervisor conforme, y no la vuelve a mandar: si se
+            # tirara, se perdería. Se reporta cuando acá también se considera convergido.
+            self.cajas_en_espera.append((x, y))
+            self.get_logger().info(f'caja en espera: AMCL sin converger ({x:.2f}, {y:.2f})')
             return
+        self.registrar_caja(x, y)
+
+    def registrar_caja(self, x, y):
+        if self.estado == 'FIN':
+            return  # tras /done no se reporta más
         radio = self.valor('radio_duplicado_m')
         if any(math.hypot(x - a, y - b) < radio for a, b in self.confirmadas):
             return
@@ -236,6 +245,10 @@ class NodoMision(Node):
         if convergio and self.largada is None:
             self.largada = self.en_mapa(self.largada_odom)
             self.get_logger().info(f'largada estimada {self.largada}')
+        if convergio and self.cajas_en_espera:
+            for cx, cy in self.cajas_en_espera:
+                self.registrar_caja(cx, cy)
+            self.cajas_en_espera = []
         puntos = self.puntos_lidar()
         if not convergio or puntos is None or giro > 0.6:
             return

@@ -28,8 +28,16 @@ figura en la sección 0; el resto sigue siendo propuesta.
 - **Para ajustar entre corridas** (son hiperparámetros): `alpha1` y `alpha2` (cuánto se desconfía
   del giro de las ruedas: subirlos si en el robot real la pose salta al girar), las σ de
   `nodo_pose_inicial` y `z_rand` (tolerancia a ventanas y a obstáculos que no están en el mapa).
-- **Pendiente:** confirmar con el bag de la semana 10 que el robot real publica TF
-  `odom → base_footprint` (el simulador sí; el contrato del robot real dice los mismos frames).
+- **Robot real (bag `minilaberinto` del 30/10, ya con la odometría corregida):**
+  - Publica TF `odom → base_footprint` a ~10 Hz y los mismos frames que el simulador
+    (`base_link`, `laser_link`, `imu_link`, `cam_1_*`). `map → odom` no está: lo pone AMCL.
+  - El lidar está montado girado 180° (`laser_link`, yaw 180°), igual que en el simulador:
+    `angulo_frente_deg: 180` vale también en el robot. Scan de 360° en 1080 rayos (0,33°).
+  - El IMU está montado dado vuelta (eje z para abajo): su `angular_velocity.z` tiene el signo
+    opuesto al giro del robot. Si alguien lo fusiona (robot_localization), usar TF, no el valor crudo.
+  - Giro de `/odom` contra el giroscopio: 705° contra 725° en total (~3% menos); en giros
+    sueltos, entre 0,81 y 1,08 veces lo real. Con `alpha1: 0.4`, AMCL supone un desvío de ~0,63
+    veces el giro (`sqrt(alpha1)`, ver `omni_motion_model.cpp`): cubre de sobra ese error.
 
 ### Navegación (hecho)
 
@@ -52,9 +60,9 @@ figura en la sección 0; el resto sigue siendo propuesta.
   contactos cerca de las paredes (hasta 8 por corrida contra el umbral de 2,5 cm del monitor) y
   probar en el robot real.
 - **Depende de AMCL:** los resultados de arriba usaron AMCL con `alpha4: 0.02`, `sigma_hit: 0.1`,
-  `z_hit: 0.8`, `z_rand: 0.2`, `max_beams: 180` y `update_min_d/a: 0.05`, que **no** están en este
-  `params.yaml`. Con los valores actuales, `maze_1_6x5` dio 0 puntos (error típico de AMCL: 0,74 m);
-  con los de `feature/localizacion-real`, 100 puntos (0,09 m, pero llegó a perderse 2,36 m).
+  `z_hit: 0.8`, `z_rand: 0.2`, `max_beams: 180` y `update_min_d/a: 0.05`, que ya son los de
+  `params.yaml`. Con los anteriores (`alpha4: 0.2`, `z_hit/z_rand: 0.5`, `max_beams: 60`),
+  `maze_1_6x5` dio 0 puntos (error típico de AMCL: 0,74 m).
 
 ## 1. Módulos
 

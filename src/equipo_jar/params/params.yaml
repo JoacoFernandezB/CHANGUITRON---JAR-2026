@@ -56,6 +56,8 @@ nodo_pose_inicial:
     sigma_xy_inicial_m: 0.15        # desvío en x e y (m)
     sigma_yaw_inicial_deg: 10.0     # desvío del ángulo (grados)
     periodo_pose_inicial_s: 1.0     # cada cuánto se reintenta hasta que AMCL se localiza
+    actualizaciones_sin_movimiento: 10  # después, cuántas veces se le pide a AMCL que corrija quieto
+    periodo_actualizacion_s: 0.3    # cada cuánto (s): ~3 s en total, alcanza para varios scans
     frame_mapa: map
     frame_odom: odom
 
@@ -68,7 +70,7 @@ amcl:
     alpha1: 0.4                     # ruido de giro por giro
     alpha2: 0.2                     # ruido de giro por avance
     alpha3: 0.2                     # ruido de avance por avance
-    alpha4: 0.2                     # ruido de avance por giro
+    alpha4: 0.02                    # ruido de avance por giro
     alpha5: 0.2                     # ruido del desplazamiento lateral (solo omni)
     base_frame_id: base_footprint
     odom_frame_id: odom
@@ -82,16 +84,16 @@ amcl:
     laser_max_range: -1.0           # -1: usar el rango que informa el /scan
     laser_min_range: -1.0
     laser_likelihood_max_dist: 2.0
-    max_beams: 60                   # rayos del scan que se usan por actualización
-    z_hit: 0.5
-    z_rand: 0.5                     # alto: tolera ventanas y obstáculos que no están en el mapa
-    sigma_hit: 0.2
+    max_beams: 180                  # rayos del scan que se usan por actualización
+    z_hit: 0.8                      # cuánto se confía en que el rayo pega en una pared del mapa...
+    z_rand: 0.2                     # ...y cuánto en que es ruido (ventanas, obstáculos fuera del mapa)
+    sigma_hit: 0.1                  # desvío del lidar contra el mapa (m): 0.2 dejaba perderse a AMCL en pasillos largos
     min_particles: 500
     max_particles: 2000
     pf_err: 0.05
     pf_z: 0.99
-    update_min_d: 0.10              # se actualiza cada 10 cm de avance...
-    update_min_a: 0.15              # ...o cada 0,15 rad de giro
+    update_min_d: 0.05              # se actualiza cada 5 cm de avance...
+    update_min_a: 0.05              # ...o cada 0,05 rad de giro
     resample_interval: 1
     recovery_alpha_slow: 0.0
     recovery_alpha_fast: 0.0

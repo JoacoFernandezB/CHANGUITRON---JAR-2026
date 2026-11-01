@@ -33,10 +33,10 @@ nodo_equipo:
 nodo_percepcion:
   ros__parameters:
     frecuencia_hz: 10.0
-    angulo_frente_deg: 180.0        # el frente del robot en el /scan (el lidar simulado está al revés)
+    angulo_frente_deg: 180.0        # frente del robot en el /scan, solo si TF no lo da (sale de TF)
     # Cuándo se mira
-    velocidad_lineal_min_deteccion: 0.05  # m/s: más lento que esto (girando en el lugar) no se mira
-    giro_max_deteccion: 0.7         # rad/s: girando más rápido, no se mira (el giro se compensa con TF)
+    velocidad_lineal_min_deteccion: 0.0   # m/s: más lento que esto no se mira. En 0: se mira quieto (inspección)
+    giro_max_deteccion: 0.7         # rad/s: girando más rápido, no se mira (más lento, el giro se compensa con TF)
     # Color: qué cuenta como rojo (HSV de OpenCV, H de 0 a 180)
     saturacion_min: 120             # S mínima (0-255) para contar un píxel como rojo
     valor_min: 80                   # V mínimo (0-255)

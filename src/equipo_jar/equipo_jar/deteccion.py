@@ -155,18 +155,31 @@ def manchas_rojas(imagen_bgr, color, margen_borde_px=5):
     return sorted(manchas, key=lambda mancha: mancha.area, reverse=True)
 
 
-def buscar_caja_roja(imagen_bgr, color, forma):
-    """(Mancha, None) con la caja roja más grande que pasa los filtros de forma, o
-    (None, motivo) con el motivo por el que se descartó la mancha roja más grande."""
+def buscar_cajas_rojas(imagen_bgr, color, forma):
+    """([Mancha], motivo): todas las manchas que pasan los filtros de forma, de la más grande a
+    la más chica, y el motivo por el que se descartó la mancha roja más grande (None si pasó).
+
+    Todas, no solo la más grande: si en la imagen hay una caja ya confirmada (más cerca, más
+    grande) y otra más lejos, mirando solo la más grande la segunda no se procesaría nunca.
+    """
     alto_img, ancho_img = imagen_bgr.shape[:2]
-    primer_motivo = 'no hay rojo'
+    cajas, primer_motivo = [], 'no hay rojo'
     for i, mancha in enumerate(manchas_rojas(imagen_bgr, color, forma.margen_borde_px)):
         motivo = motivo_de_descarte(mancha, ancho_img, alto_img, forma)
         if motivo is None:
-            return mancha, None
+            cajas.append(mancha)
         if i == 0:
             primer_motivo = motivo
-    return None, primer_motivo
+    return cajas, primer_motivo
+
+
+def buscar_caja_roja(imagen_bgr, color, forma):
+    """(Mancha, None) con la caja roja más grande que pasa los filtros de forma, o
+    (None, motivo) con el motivo por el que se descartó la mancha roja más grande."""
+    cajas, motivo = buscar_cajas_rojas(imagen_bgr, color, forma)
+    if cajas:
+        return cajas[0], None
+    return None, motivo
 
 
 # --- 3. Lidar --------------------------------------------------------------------------------
@@ -178,6 +191,23 @@ def angulo_de_columna(columna, fx, cx):
     del topic de la cámara `camera_info` (matriz K: fx = k[0], cx = k[2]).
     """
     return math.atan2(cx - columna, fx)
+
+
+def frente_del_lidar(qx, qy, qz, qw):
+    """(frente_deg, derecho) del lidar, a partir de su orientación en el robot (TF, cuaternión).
+
+    frente_deg: el ángulo del /scan que apunta al frente del robot. Un rayo a θ en el marco del
+    lidar apunta a θ + yaw en el del robot, así que el frente (0 en el robot) es θ = -yaw. En el
+    simulador el lidar está montado al revés (yaw = π): da 180°.
+    derecho: False si el lidar está dado vuelta o inclinado (su eje z no apunta para arriba). Ahí
+    los ángulos del /scan van al revés y esta cuenta no sirve.
+    """
+    yaw = yaw_de_cuaternion(qx, qy, qz, qw)
+    eje_z_arriba = 1.0 - 2.0 * (qx * qx + qy * qy)  # componente z del eje z del lidar
+    frente = math.degrees(normalizar_angulo(-yaw))
+    if frente <= -180.0 + 1e-6:
+        frente += 360.0  # -180 y 180 son el mismo rayo; 180 se lee mejor en el log
+    return frente, eje_z_arriba > 0.9
 
 
 def tramo_del_lidar(rangos, angulo_min, incremento, frente_deg, desde_deg, hasta_deg,

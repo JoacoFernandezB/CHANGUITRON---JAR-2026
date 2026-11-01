@@ -5,9 +5,9 @@ import pytest
 
 from equipo_jar.deteccion import (
     FiltroColor, FiltroForma, Mancha, angulo_de_columna, apoyada_en_el_piso, buscar_caja_roja,
-    cerca_de_alguno, coinciden, distancia_a_la_caja, distancia_por_altura, filas_esperadas,
-    hay_algo_delante, mascara_rojo, mediana_del_tramo, profundidad, promedio, punto_en_el_plano,
-    tramo_del_lidar, yaw_de_cuaternion)
+    buscar_cajas_rojas, cerca_de_alguno, coinciden, distancia_a_la_caja, distancia_por_altura,
+    filas_esperadas, frente_del_lidar, hay_algo_delante, mascara_rojo, mediana_del_tramo,
+    profundidad, promedio, punto_en_el_plano, tramo_del_lidar, yaw_de_cuaternion)
 
 # La cámara del robot (real_robot_contract.yaml del simulador): 320 x 240, a 0,109 m del piso.
 ANCHO, ALTO = 320, 240
@@ -72,6 +72,26 @@ def test_elige_la_roja_entre_distractores():
     dibujar_caja(img, 1.6, columna=150, color=ROJO)
     mancha, _ = buscar(img)
     assert mancha is not None and mancha.columna == pytest.approx(150, abs=2)
+
+
+def test_devuelve_todas_las_cajas_de_la_imagen():
+    # Una caja cerca (quizás ya confirmada) no tiene que tapar a otra más lejos.
+    img = imagen_vacia()
+    dibujar_caja(img, 0.8, columna=80)
+    dibujar_caja(img, 1.8, columna=240)
+    cajas, motivo = buscar_cajas_rojas(img, COLOR, FORMA)
+    assert motivo is None
+    assert [c.columna for c in cajas] == [pytest.approx(80, abs=2), pytest.approx(240, abs=2)]
+
+
+def test_todas_las_cajas_saltea_las_descartadas():
+    img = imagen_vacia()
+    dibujar_caja(img, 0.6, columna=5)       # la más grande, cortada por el costado
+    dibujar_caja(img, 1.5, columna=200)
+    cajas, motivo = buscar_cajas_rojas(img, COLOR, FORMA)
+    assert motivo == 'cortada por un costado de la imagen'
+    assert len(cajas) == 1 and cajas[0].columna == pytest.approx(200, abs=2)
+    assert buscar_cajas_rojas(imagen_vacia(), COLOR, FORMA) == ([], 'no hay rojo')
 
 
 def test_la_limpieza_borra_bordes_finos_de_otros_colores():
@@ -272,3 +292,22 @@ def test_duplicados_y_promedio():
     assert not cerca_de_alguno((1.0, 1.0), [(3.0, 1.0)], 0.5)
     assert not cerca_de_alguno((1.0, 1.0), [], 0.5)
     assert promedio([(0.0, 0.0), (2.0, 4.0)]) == pytest.approx((1.0, 2.0))
+
+
+def cuaternion(roll=0.0, pitch=0.0, yaw=0.0):
+    cr, sr = math.cos(roll / 2), math.sin(roll / 2)
+    cp, sp = math.cos(pitch / 2), math.sin(pitch / 2)
+    cy, sy = math.cos(yaw / 2), math.sin(yaw / 2)
+    return (sr * cp * cy - cr * sp * sy, cr * sp * cy + sr * cp * sy,
+            cr * cp * sy - sr * sp * cy, cr * cp * cy + sr * sp * sy)
+
+
+def test_frente_del_lidar():
+    # El del simulador: laser_link con rpy 0 0 pi (al revés): el frente es el rayo de 180°.
+    frente, derecho = frente_del_lidar(*cuaternion(yaw=math.pi))
+    assert derecho and abs(frente) == pytest.approx(180.0)
+    assert frente_del_lidar(*cuaternion()) == (pytest.approx(0.0), True)
+    # Girado 90° a la izquierda: el frente del robot queda a la derecha del lidar.
+    assert frente_del_lidar(*cuaternion(yaw=math.pi / 2)) == (pytest.approx(-90.0), True)
+    # Dado vuelta: los ángulos del /scan van al revés y no se puede usar.
+    assert not frente_del_lidar(*cuaternion(roll=math.pi))[1]

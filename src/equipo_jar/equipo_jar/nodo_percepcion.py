@@ -18,7 +18,8 @@ Cómo se ubica una caja (las cuentas están en deteccion.py, sin ROS y con tests
 La pose sale de supervisor_localizacion.py: AMCL mientras coincida con la odometría, y la última
 corrección buena de AMCL + /odom (respaldo) cuando AMCL salta, deriva o deja de publicar. La pose
 se toma en el instante de la imagen (TF odom -> base_footprint con el stamp de la imagen), no en
-el de ahora: la imagen llega con unas decenas de ms de atraso.
+el de ahora: la imagen llega con unas decenas de ms de atraso. Al arrancar no se ubica nada hasta
+que nodo_mision avisa en /equipo/amcl_convergido que AMCL convergió (el robot ya se movió).
 
 Se mira también con el robot quieto: nodo_mision frena unos segundos frente a cada objeto para
 mirarlo, y quieto la imagen, el scan y la pose son del mismo instante (es la mejor vista). No se
@@ -39,6 +40,7 @@ from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
 from rclpy.time import Time
 from sensor_msgs.msg import CameraInfo, Image, LaserScan
+from std_msgs.msg import Empty
 from tf2_ros import Buffer, TransformException, TransformListener
 
 from equipo_jar.agrupador import AgrupadorCajas
@@ -62,6 +64,8 @@ QOS_MAPA = QoSProfile(
 TOPIC_CAJAS = '/equipo/cajas_confirmadas'
 # Lo publica nuestro AMCL (es interno): de acá sale su covarianza.
 TOPIC_POSE_AMCL = '/amcl_pose'
+# Interno: nodo_mision avisa una vez que AMCL convergió (un solo criterio para los dos nodos).
+TOPIC_CONVERGENCIA = '/equipo/amcl_convergido'
 
 # Parámetros y su valor por defecto. Los valores de la corrida viven en params/params.yaml (§9.1).
 PARAMETROS = {
@@ -145,6 +149,7 @@ class NodoPercepcion(Node):
         self.info_camara = None
         self.velocidad = (0.0, 0.0)   # (lineal en m/s, giro en rad/s), de /odom
         self.sigmas_amcl = None       # (sigma_xy m, sigma_yaw rad) de la covarianza de AMCL
+        self.convergencia_avisada = False  # llegó el aviso de nodo_mision
         self.estado_anterior = None
         self.giro_scan_deg = 0.0      # cuánto giró el robot entre el rayo del lidar y la imagen
         self.lidar_en_robot = None    # (x, y) del lidar en base_footprint, de TF
@@ -165,6 +170,9 @@ class NodoPercepcion(Node):
         # AMCL lo publica reliable; reliable + volatile se conecta con cualquier durability.
         self.sub_amcl = self.create_subscription(
             PoseWithCovarianceStamped, TOPIC_POSE_AMCL, self.al_recibir_pose_amcl, 10)
+        # Transient local: si el aviso salió antes de que este nodo se suscriba, llega igual.
+        self.sub_convergencia = self.create_subscription(
+            Empty, TOPIC_CONVERGENCIA, self.al_recibir_convergencia, QOS_MAPA)
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
 
@@ -194,6 +202,9 @@ class NodoPercepcion(Node):
     def al_recibir_odom(self, odom):
         t = odom.twist.twist
         self.velocidad = (math.hypot(t.linear.x, t.linear.y), t.angular.z)
+
+    def al_recibir_convergencia(self, _msg):
+        self.convergencia_avisada = True
 
     def al_recibir_pose_amcl(self, msg):
         cov = msg.pose.covariance
@@ -287,6 +298,8 @@ class NodoPercepcion(Node):
         ahora = self.get_clock().now().nanoseconds * 1e-9
         odom = self.pose_tf(self.p('frame_odom'), self.p('frame_robot'))
         correccion, t_correccion = self.correccion_amcl()
+        if self.convergencia_avisada:
+            self.supervisor.avisar_convergencia()
         estado = self.supervisor.actualizar(
             ahora, odom, correccion, t_correccion, self.sigmas_amcl)
         self.informar(estado)

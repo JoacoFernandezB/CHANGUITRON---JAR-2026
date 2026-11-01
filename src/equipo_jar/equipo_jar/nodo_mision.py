@@ -6,6 +6,12 @@ terminar. Así dos nodos nunca se pisan el comando.
 
 Cuando el robot se traba, cancela la meta y sale despacio (equipo_jar/escape.py). Reintenta la meta
 una vez; si se vuelve a trabar, la abandona: se pierde esa meta, no la corrida.
+
+También es el único que decide cuándo AMCL convergió al arrancar: cuando el robot se alejó
+`distancia_convergencia_m` de la largada y pasaron `espera_convergencia_s`. Quieto, AMCL no fija
+bien el ángulo (en simulación quedaba 5,5° corrido aunque su covarianza ya era chica, y una caja
+a 2,7 m se ubicaba 0,3 m mal); moviéndose unos decímetros baja a menos de 1°. Lo avisa una vez en
+/equipo/amcl_convergido y percepción no ubica cajas hasta recibirlo: un solo criterio para los dos.
 """
 import math
 
@@ -29,6 +35,7 @@ from std_msgs.msg import Empty
 from tf2_ros import Buffer, TransformListener
 
 COBERTURA, INSPECCION, REGRESO = 'COBERTURA', 'INSPECCION', 'REGRESO'
+TOPIC_CONVERGENCIA = '/equipo/amcl_convergido'  # interno: lo escucha nodo_percepcion
 
 
 def yaw_de(q):
@@ -135,6 +142,9 @@ class NodoMision(Node):
         self.pub_cmd = self.create_publisher(Twist, '/cmd_vel', 10)
         self.pub_victimas = self.create_publisher(PointStamped, '/victimas', 10)
         self.pub_done = self.create_publisher(Empty, '/done', 10)
+        # Transient local, como /map: si percepción arranca (o se reinicia) después del aviso,
+        # igual lo recibe.
+        self.pub_convergencia = self.create_publisher(Empty, TOPIC_CONVERGENCIA, qos_mapa)
         self.nav = ActionClient(self, NavigateToPose, 'navigate_to_pose')
         self.create_timer(1.0 / p('frecuencia_hz').value, self.ciclo)
 
@@ -245,6 +255,8 @@ class NodoMision(Node):
         if convergio and self.largada is None:
             self.largada = self.en_mapa(self.largada_odom)
             self.get_logger().info(f'largada estimada {self.largada}')
+            self.pub_convergencia.publish(Empty())  # una sola vez: percepción ya puede ubicar
+            self.get_logger().info(f'AMCL convergido: aviso en {TOPIC_CONVERGENCIA}')
         if convergio and self.cajas_en_espera:
             for cx, cy in self.cajas_en_espera:
                 self.registrar_caja(cx, cy)

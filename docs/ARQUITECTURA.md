@@ -67,8 +67,7 @@ figura en la sección 0; el resto sigue siendo propuesta.
 ### Percepción
 
 `nodo_percepcion` publica cada caja una sola vez en `/equipo/cajas_confirmadas`; `nodo_mision` la
-reporta (las que llegan antes de que, según su propia espera, AMCL haya convergido quedan en
-espera y se reportan después; tras `/done` no reporta más). Percepción mira también con el robot
+reporta (tras `/done` no reporta más). Percepción mira también con el robot
 quieto (`velocidad_lineal_min_deteccion: 0.0`), que es cuando `nodo_mision` frena frente a un
 objeto para inspeccionarlo; no mira girando a más de `giro_max_deteccion`. Ubica cada mancha
 con forma de caja de la imagen, no solo la más grande (si no, una caja ya confirmada tapaba a
@@ -91,12 +90,22 @@ lógica está en módulos puros con tests:
   deriva o deja de publicar, la pose sale de la referencia más vieja de la ventana + `/odom`, y
   vuelve a AMCL cuando coincide y está quieto 2 s. Probado con los logs de `pruebas/` (salto de
   3,4 m, deriva de 2 m en `maze_1_6x5`, deriva de 0,9 m girando en `maze_4_metal_6x6`). Antes de
-  ubicar cajas espera a que AMCL converja (covarianza de `/amcl_pose`, o 2 m avanzados).
+  ubicar cajas espera el aviso de `nodo_mision` (ver abajo).
 
-**Pendiente:** `nodo_mision` decide por su cuenta cuándo AMCL convergió (se movió 0,6 m y esperó
-8 s) y `nodo_percepcion` por el supervisor: conviene que decida uno solo. Las cajas que llegan
-antes ya no se pierden (quedan en espera), pero se reportan tarde. Y cuando AMCL se pierde, se
-lo podría reinicializar por `/initialpose` con la pose del respaldo (es tema de localización).
+**Convergencia al arrancar: decide solo `nodo_mision`.** AMCL convergió cuando el robot se alejó
+0,6 m de la largada y pasaron 8 s más (`distancia_convergencia_m`, `espera_convergencia_s`).
+Lo avisa una vez en `/equipo/amcl_convergido` (`std_msgs/Empty`, interno, reliable + transient
+local, depth 1, como `/map`), y el supervisor no toma su primera referencia hasta recibirlo.
+Antes, el supervisor le creía a AMCL apenas su covarianza bajaba de 0,12 m y 6°, con el robot
+quieto. En `maze_4_metal_6x6` (2026-11-01, pose real del simulador): AMCL arrancó con 18° de
+error, las actualizaciones sin movimiento lo bajaron a 5,5°, la covarianza ya daba < 6° y se
+quedó así hasta que el robot se movió (en 0,5 m bajó a < 1°). Con eso, una caja a 2,7 m quedó
+ubicada 0,29–0,32 m mal (50 puntos en vez de 100): la covarianza mide cuánto se dispersan las
+partículas, no cuánto se equivocan, y las 5 vistas desde el mismo lugar comparten el mismo error.
+Las cajas en espera de `nodo_mision` quedan como red de seguridad.
+
+**Pendiente:** cuando AMCL se pierde, se lo podría reinicializar por `/initialpose` con la pose
+del respaldo (es tema de localización).
 
 ## 1. Módulos
 

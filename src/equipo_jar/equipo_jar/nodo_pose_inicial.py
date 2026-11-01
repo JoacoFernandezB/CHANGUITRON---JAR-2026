@@ -8,6 +8,12 @@ nosotros por /initialpose, con una incertidumbre que sale de params/params.yaml.
 Se manda una vez por período, después de recibir /map, hasta que AMCL publica la transformación
 map -> odom (señal de que ya se localizó). /initialpose es un topic interno: solo lo usan nuestros
 nodos.
+
+Después le pide a AMCL unas cuantas actualizaciones sin movimiento (servicio
+request_nomotion_update). AMCL solo corrige la pose cuando el robot se movió `update_min_d` o
+`update_min_a`: si el robot arrancó corrido del origen y está quieto, la pose queda mal hasta que
+se mueve. Probado con el bag del robot real arrancando a 0,29 m del origen: sin esto, la pose
+quedó corrida esos 0,29 m hasta que el robot avanzó; con esto, se corrige antes de moverse.
 """
 import math
 
@@ -18,6 +24,7 @@ from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from rclpy.time import Time
+from std_srvs.srv import Empty
 from tf2_ros import Buffer, TransformListener
 
 from equipo_jar.localizacion import covarianza_pose_inicial, cuaternion_de_yaw
@@ -38,6 +45,8 @@ class NodoPoseInicial(Node):
         self.declare_parameter('periodo_pose_inicial_s', 1.0)
         self.declare_parameter('frame_mapa', 'map')
         self.declare_parameter('frame_odom', 'odom')
+        self.declare_parameter('actualizaciones_sin_movimiento', 10)
+        self.declare_parameter('periodo_actualizacion_s', 0.3)
 
         self.mapa_recibido = False
         self.tf_buffer = Buffer()
@@ -45,6 +54,8 @@ class NodoPoseInicial(Node):
         self.sub_mapa = self.create_subscription(
             OccupancyGrid, '/map', self.al_recibir_mapa, QOS_MAPA)
         self.pub_pose = self.create_publisher(PoseWithCovarianceStamped, '/initialpose', 10)
+        self.cliente_sin_movimiento = self.create_client(Empty, 'request_nomotion_update')
+        self.actualizaciones_pedidas = 0
         self.timer = self.create_timer(
             self.get_parameter('periodo_pose_inicial_s').value, self.ciclo)
 
@@ -59,11 +70,25 @@ class NodoPoseInicial(Node):
         if self.tf_buffer.can_transform(mapa, odom, Time()):
             self.get_logger().info(f'AMCL publica {mapa} -> {odom}: localizado')
             self.timer.cancel()
+            self.timer = self.create_timer(
+                self.get_parameter('periodo_actualizacion_s').value,
+                self.pedir_actualizacion_sin_movimiento)
             return
         if self.pub_pose.get_subscription_count() == 0:
             return  # AMCL todavía no arrancó: un mensaje ahora se perdería
         self.pub_pose.publish(self.pose_inicial(mapa))
         self.get_logger().info('Pose inicial enviada a AMCL')
+
+    def pedir_actualizacion_sin_movimiento(self):
+        """Que AMCL compare el scan con el mapa aunque el robot no se haya movido."""
+        if self.actualizaciones_pedidas >= self.get_parameter(
+                'actualizaciones_sin_movimiento').value:
+            self.timer.cancel()
+            return
+        if not self.cliente_sin_movimiento.service_is_ready():
+            return
+        self.cliente_sin_movimiento.call_async(Empty.Request())
+        self.actualizaciones_pedidas += 1
 
     def pose_inicial(self, frame_mapa):
         """El origen del mapa, con la incertidumbre de params/params.yaml."""

@@ -9,31 +9,65 @@ figura en la sección 0; el resto sigue siendo propuesta.
 | --- | --- | --- |
 | **Localización** | ✅ **Hecho** (PR #2) | AMCL (`nav2_amcl`) + `nodo_pose_inicial` |
 | **Percepción** | ✅ Filtros de distractores y bordes, respaldo con odometría | `nodo_percepcion` (ver abajo) |
-| **Navegación** | Base del ejemplo 1: seguir la pared derecha | `evasion.py`, dentro de `nodo_equipo` |
-| **Misión** | Parcial: reporta y publica `/done` al llegar a N; **no vuelve a la largada** | `nodo_equipo` |
+| **Navegación** | ✅ **Nav2 + RPP** | Smac + RPP, `nodo_arranque` y el escape de `escape.py` |
+| **Misión** | ✅ Recorre, reporta, vuelve a la largada y publica `/done` | `nodo_mision`, `cobertura.py` |
+
+`nodo_equipo` (seguir la pared) queda en el repo pero ya no se lanza: lo reemplaza `nodo_mision`.
 
 ### Localización (hecho)
 
-- **AMCL** compara el `/scan` con `/map` y publica TF `map → odom`. Lo activa
-  `lifecycle_manager_localizacion` (AMCL es un nodo con ciclo de vida de Nav2).
+- **AMCL** compara el `/scan` con `/map` y publica TF `map → odom`. Lo activa `nodo_arranque`
+  (AMCL es un nodo con ciclo de vida de Nav2).
 - **`nodo_pose_inicial`**, al recibir `/map`, manda por `/initialpose` (topic interno) una
   gaussiana centrada en el origen (σ en `params.yaml`). Se usa en lugar de `set_initial_pose` de
   AMCL, que arranca todas las partículas en el mismo punto (covarianza cero).
-- **`nodo_equipo`** lee la pose de TF `map → base_footprint`. Si AMCL no se localiza en
-  `espera_localizacion_s` desde el mapa, usa `/odom` como respaldo y lo avisa en el log.
+- **`nodo_mision`** lee la pose de TF `map → base_footprint`.
 - **Medido en simulación** (`maze_1_6x5`, arranque en (0,2, −0,15) girado 0,3 rad): error de AMCL
   de 0,02 a 0,16 m y menos de 2°; `/odom` acumulaba 0,9 m y 17°. Reporte de V1 a 0,15 m del
   centro de la caja (100 puntos).
 - **Para ajustar entre corridas** (son hiperparámetros): `alpha1` y `alpha2` (cuánto se desconfía
   del giro de las ruedas: subirlos si en el robot real la pose salta al girar), las σ de
   `nodo_pose_inicial` y `z_rand` (tolerancia a ventanas y a obstáculos que no están en el mapa).
-- **Pendiente:** confirmar con el bag de la semana 10 que el robot real publica TF
-  `odom → base_footprint` (el simulador sí; el contrato del robot real dice los mismos frames).
+- **Robot real (bag `minilaberinto` del 30/10, ya con la odometría corregida):**
+  - Publica TF `odom → base_footprint` a ~10 Hz y los mismos frames que el simulador
+    (`base_link`, `laser_link`, `imu_link`, `cam_1_*`). `map → odom` no está: lo pone AMCL.
+  - El lidar está montado girado 180° (`laser_link`, yaw 180°), igual que en el simulador:
+    `angulo_frente_deg: 180` vale también en el robot. Scan de 360° en 1080 rayos (0,33°).
+  - El IMU está montado dado vuelta (eje z para abajo): su `angular_velocity.z` tiene el signo
+    opuesto al giro del robot. Si alguien lo fusiona (robot_localization), usar TF, no el valor crudo.
+  - Giro de `/odom` contra el giroscopio: 705° contra 725° en total (~3% menos); en giros
+    sueltos, entre 0,81 y 1,08 veces lo real. Con `alpha1: 0.4`, AMCL supone un desvío de ~0,63
+    veces el giro (`sqrt(alpha1)`, ver `omni_motion_model.cpp`): cubre de sobra ese error.
+
+### Navegación (hecho)
+
+- **Cadena del comando:** `controller_server` (RPP) → `velocity_smoother` → `/equipo/cmd_vel_nav` →
+  `nodo_mision` → `/cmd_vel`. Las recuperaciones de Nav2 también van a `/equipo/cmd_vel_nav`.
+  `nodo_mision` es el único que publica en `/cmd_vel`: corta a Nav2 cuando mira un objeto, escapa
+  de una traba o terminó.
+- **`nodo_arranque`** reemplaza al `lifecycle_manager`. Ese gestor espera sin límite cada respuesta
+  y, si una se pierde, el robot no se mueve en toda la corrida. Pasaba en 3 de cada 30 corridas.
+- **Planificador:** `SmacPlanner2D`. NavFn fallaba en pasos justos con *failed to create a plan from
+  potential*: encontraba que había camino pero no lo podía trazar.
+- **RPP sin `use_collision_detection`:** con la detección prendida, la huella real toca el costmap
+  en huecos por los que el robot entra, y RPP no avanza (quedó en 0 puntos en `maze_4_metal_6x6`).
+- **Trabas** (`escape.py`): tras 6 s quieto, o 15 s sin alejarse 0,15 m aunque gire, se cancela la
+  meta y el robot sale despacio hacia donde el lidar ve más lugar, también de costado. Reintenta la
+  meta una vez; a la segunda traba la abandona.
+- **Medido en simulación** (corridas de 300 s): `maze_1_6x5` con esta configuración dio 400, 500,
+  500 y 500. En los cuatro mapas, solo apagar la detección de RPP subió la media de 200 a 350.
+- **Pendiente:** validar los cuatro mapas (la tanda de 16 corridas se cortó en la 2), bajar los
+  contactos cerca de las paredes (hasta 8 por corrida contra el umbral de 2,5 cm del monitor) y
+  probar en el robot real.
+- **Depende de AMCL:** los resultados de arriba usaron AMCL con `alpha4: 0.02`, `sigma_hit: 0.1`,
+  `z_hit: 0.8`, `z_rand: 0.2`, `max_beams: 180` y `update_min_d/a: 0.05`, que ya son los de
+  `params.yaml`. Con los anteriores (`alpha4: 0.2`, `z_hit/z_rand: 0.5`, `max_beams: 60`),
+  `maze_1_6x5` dio 0 puntos (error típico de AMCL: 0,74 m).
 
 ### Percepción
 
-`nodo_percepcion` publica cada caja una sola vez en `/equipo/cajas_confirmadas`; `nodo_equipo` la
-reporta. La lógica está en módulos puros con tests:
+`nodo_percepcion` publica cada caja una sola vez en `/equipo/cajas_confirmadas`; `nodo_mision` la
+reporta (descarta las que llegan antes de que, según su propia espera, AMCL haya convergido). La lógica está en módulos puros con tests:
 
 - **`deteccion.py`**: color (HSV con límites de H para no tomar naranjas ni magentas, y limpieza
   de bordes finos), forma (relleno y proporción de caja, sin tocar ningún borde de la imagen),
@@ -52,8 +86,9 @@ reporta. La lógica está en módulos puros con tests:
   3,4 m, deriva de 2 m en `maze_1_6x5`, deriva de 0,9 m girando en `maze_4_metal_6x6`). Antes de
   ubicar cajas espera a que AMCL converja (covarianza de `/amcl_pose`, o 2 m avanzados).
 
-**Pendiente:** `nodo_equipo` todavía tiene su propio respaldo (solo si AMCL nunca arranca). Podría
-usar el mismo supervisor. Y cuando AMCL se pierde, se lo podría reinicializar por `/initialpose`
+**Pendiente:** `nodo_mision` decide por su cuenta cuándo AMCL convergió (se movió 0,6 m y esperó
+8 s) y `nodo_percepcion` por el supervisor: conviene que decida uno solo, para que no se pierdan
+cajas. Y cuando AMCL se pierde, se lo podría reinicializar por `/initialpose`
 con la pose del respaldo (es tema de localización).
 
 ## 1. Módulos
@@ -91,9 +126,8 @@ Con ~10 días hasta la clasificación, **A** suele ser lo más seguro para "move
 trabajo propio se concentra en percepción y misión, que es donde están los puntos. **B** da más
 control, pero se come el tiempo en reinventar el planificador y las recuperaciones.
 
-Si vamos con Nav2: agregar `<exec_depend>nav2_bringup</exec_depend>` (y lo que haga falta) a
-`package.xml` para que rosdep lo meta en la imagen, y sus parámetros en `params/` (sin poses
-iniciales fijas: la pose inicial sale de "cerca del origen" o de una localización global).
+**Decisión: A, Nav2 con RPP** (estado en la sección 0). Sus dependencias están en `package.xml` y
+sus parámetros en `params/params.yaml`.
 
 ## 3. Puntos de diseño que valen puntos
 

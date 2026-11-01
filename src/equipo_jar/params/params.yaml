@@ -28,26 +28,77 @@ nodo_equipo:
     espera_localizacion_s: 15.0     # sin AMCL después de esto (s) desde el mapa, se usa /odom
 
 # Percepción: encontrar las cajas rojas y ubicarlas en el mapa (workshop de la semana 04).
+# Los filtros están explicados en equipo_jar/deteccion.py. Para ver por qué se descarta cada
+# vista, poné log_descartes en true.
 nodo_percepcion:
   ros__parameters:
     frecuencia_hz: 10.0
     angulo_frente_deg: 180.0        # el frente del robot en el /scan (el lidar simulado está al revés)
+    # Cuándo se mira
     velocidad_lineal_min_deteccion: 0.05  # m/s: más lento que esto (girando en el lugar) no se mira
+    giro_max_deteccion: 0.7         # rad/s: girando más rápido, no se mira (el giro se compensa con TF)
+    # Color: qué cuenta como rojo (HSV de OpenCV, H de 0 a 180)
     saturacion_min: 120             # S mínima (0-255) para contar un píxel como rojo
     valor_min: 80                   # V mínimo (0-255)
+    hue_max_bajo: 10                # rojo en H [0, esto]. Subirlo deja pasar naranjas
+    hue_min_alto: 170               # rojo en H [esto, 180]. Bajarlo deja pasar magentas
+    limpieza_px: 3                  # borra de la máscara lo más fino que esto (bordes de otros colores)
+    # Forma: que la mancha parezca una caja entera
     area_minima_px: 400.0           # una mancha roja más chica que esto (px) se descarta
-    margen_borde_px: 5              # una mancha a menos de esto (px) del borde está cortada: se descarta
+    margen_borde_px: 5              # a menos de esto (px) de un borde, la mancha está cortada (de costado: se descarta)
+    relleno_min: 0.65               # área / rectángulo: una caja da ~0,9, un hilo o una L mucho menos
+    proporcion_min: 0.55            # ancho / alto de la mancha. Caja entera: 0,83 a 1,18
+    proporcion_max: 1.6
+    # Lidar
     fraccion_central: 0.6           # qué parte del ancho de la caja mira el lidar (el centro)
+    tramo_min_deg: 3.0              # ancho mínimo (grados) de ese tramo
+    tolerancia_tramo_m: 0.10        # un rayo a menos de esto de la mediana es "parejo"
+    fraccion_tramo_min: 0.6         # menos rayos parejos que esto: es un borde, se descarta
+    ancho_oclusion_deg: 4.0         # cuánto se mira al costado de la mancha buscando algo delante
+    salto_oclusion_m: 0.15          # algo al costado más cerca que la caja por esto: la tapa
     distancia_min_deteccion_m: 0.35 # rango de distancias donde la medición sirve
     distancia_max_deteccion_m: 3.0
+    # Caja y cámara
     semilado_caja_m: 0.125          # medio lado de la caja: del frente al centro (medilo)
     alto_caja_m: 0.30               # alto de la caja (medilo): da una segunda estimación de la distancia
-    tolerancia_distancia: 0.25      # cuánto pueden diferir (fracción) la distancia del lidar y la de la imagen
-    confirmaciones: 5               # vistas seguidas que tienen que coincidir para reportar
-    dispersion_max_m: 0.25          # cuánto pueden diferir esas vistas entre sí (m)
+    tolerancia_distancia: 0.25      # cuánto pueden diferir (fracción) la profundidad del lidar y la de la imagen
+    tolerancia_piso: 0.25           # cuánto (fracción del alto) puede estar corrida la mancha de donde estaría en el piso
+    # Mapa: descartar cajas adentro de paredes o vistas a través de ellas
+    usar_mapa: true
+    radio_libre_m: 0.15             # tiene que haber piso libre a menos de esto del centro de la caja
+    margen_vista_inicio_m: 0.15     # paredes a menos de esto del robot no cuentan (error de pose)
+    margen_vista_fin_m: 0.20        # ni a menos de esto de la caja (cajas contra la pared)
+    # Confirmación: vistas que se juntan en una caja
+    confirmaciones: 5               # vistas (imágenes distintas) que tiene que juntar una caja para reportarla
+    radio_grupo_m: 0.30             # una vista a menos de esto de un grupo se suma a él
+    dispersion_max_m: 0.15          # las vistas de un grupo tienen que estar así de juntas (mediana, m)
+    olvido_s: 3.0                   # un grupo sin vistas nuevas en este tiempo se olvida
     radio_duplicado_m: 0.60         # a menos de esto de una caja ya confirmada, es la misma
     frame_mapa: map
+    frame_odom: odom
     frame_robot: base_footprint
+    log_descartes: true             # loguea (1 por s) por qué se descarta una vista con rojo
+    # Localización: cuándo creerle a AMCL y cuándo usar el respaldo con /odom
+    # (equipo_jar/supervisor_localizacion.py). Todos con punto decimal: son double.
+    loc_max_antiguedad_s: 1.5       # map -> odom más viejo que esto: AMCL no publica
+    loc_margen_m: 0.10              # diferencia AMCL vs /odom que se tolera siempre
+    loc_margen_deg: 8.0
+    loc_tolerancia_por_metro_m: 0.08   # más lo que puede derivar /odom por metro avanzado...
+    loc_tolerancia_por_metro_deg: 10.0
+    loc_tolerancia_por_radian_deg: 4.0 # ...y en ángulo por radián girado (girar no corre x, y)
+    loc_tolerancia_max_m: 0.60
+    loc_tolerancia_max_deg: 30.0
+    loc_paso_referencia_m: 0.50
+    loc_ventana_referencias_m: 2.0  # se compara contra lo que decía AMCL en los últimos 2 m
+    loc_confirmar_regreso_s: 2.0    # AMCL tiene que coincidir y estar quieto esto para dejar el respaldo
+    loc_sigma_xy_convergida_m: 0.12 # covarianza de AMCL que se considera convergida
+    loc_sigma_yaw_convergida_deg: 6.0
+    loc_avance_convergencia_m: 2.0  # sin covarianza chica, se le cree a AMCL tras avanzar esto
+    loc_espera_sin_amcl_s: 15.0     # sin AMCL tras esto, /odom como mapa (igual que nodo_equipo)
+    loc_avance_max_respaldo_m: 6.0  # en respaldo, desde la referencia: más que esto, no se ubican cajas
+    loc_giro_max_respaldo_deg: 1800.0  # ...ni girando más que esto (en el robot real, medir el error de giro de /odom)
+    loc_estable_para_reaceptar_s: 10.0 # AMCL firme en otro lugar este tiempo...
+    loc_avance_para_reaceptar_m: 3.0   # ...y con el robot avanzando esto: se relocalizó, se acepta
 
 # Pose inicial que se le da a AMCL: una gaussiana centrada en el origen del mapa, donde arranca
 # el robot (§1). Las sigmas son cuánto puede estar corrido el robot de ahí.

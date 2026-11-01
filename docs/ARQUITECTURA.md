@@ -8,7 +8,7 @@ figura en la sección 0; el resto sigue siendo propuesta.
 | Módulo | Estado | Cómo |
 | --- | --- | --- |
 | **Localización** | ✅ **Hecho** (PR #2) | AMCL (`nav2_amcl`) + `nodo_pose_inicial` |
-| **Percepción** | Nodo propio (PR #4) | `nodo_percepcion`, publica en `/equipo/cajas_confirmadas` |
+| **Percepción** | ✅ Filtros de distractores y bordes, respaldo con odometría | `nodo_percepcion` (ver abajo) |
 | **Navegación** | ✅ **Nav2 + RPP** | Smac + RPP, `nodo_arranque` y el escape de `escape.py` |
 | **Misión** | ✅ Recorre, reporta, vuelve a la largada y publica `/done` | `nodo_mision`, `cobertura.py` |
 
@@ -63,6 +63,33 @@ figura en la sección 0; el resto sigue siendo propuesta.
   `z_hit: 0.8`, `z_rand: 0.2`, `max_beams: 180` y `update_min_d/a: 0.05`, que ya son los de
   `params.yaml`. Con los anteriores (`alpha4: 0.2`, `z_hit/z_rand: 0.5`, `max_beams: 60`),
   `maze_1_6x5` dio 0 puntos (error típico de AMCL: 0,74 m).
+
+### Percepción
+
+`nodo_percepcion` publica cada caja una sola vez en `/equipo/cajas_confirmadas`; `nodo_mision` la
+reporta (descarta las que llegan antes de que, según su propia espera, AMCL haya convergido). La lógica está en módulos puros con tests:
+
+- **`deteccion.py`**: color (HSV con límites de H para no tomar naranjas ni magentas, y limpieza
+  de bordes finos), forma (relleno y proporción de caja, sin tocar ningún borde de la imagen),
+  lidar (mediana del tramo central y rayos parejos: si no, es un borde), oclusión (algo más cerca
+  justo al costado de la mancha) y cámara (profundidad, no rango, contra el alto; y la mancha donde
+  estaría una caja apoyada en el piso).
+- **`mapa.py`**: descarta un centro adentro de una pared o afuera del mapa, y una caja que en el
+  `/map` queda detrás de una pared (eso pasa cuando la pose está mal).
+- **`agrupador.py`**: junta las vistas por cercanía y publica la mediana; una vista mala no borra
+  las buenas.
+- **`supervisor_localizacion.py`**: la pose sale de AMCL mientras coincida con `/odom` (contra lo
+  que decía AMCL en los últimos 2 m; la tolerancia de posición crece con lo avanzado y la de
+  ángulo, también con lo girado: girar en el lugar no corre la posición de `/odom`). Si AMCL salta,
+  deriva o deja de publicar, la pose sale de la referencia más vieja de la ventana + `/odom`, y
+  vuelve a AMCL cuando coincide y está quieto 2 s. Probado con los logs de `pruebas/` (salto de
+  3,4 m, deriva de 2 m en `maze_1_6x5`, deriva de 0,9 m girando en `maze_4_metal_6x6`). Antes de
+  ubicar cajas espera a que AMCL converja (covarianza de `/amcl_pose`, o 2 m avanzados).
+
+**Pendiente:** `nodo_mision` decide por su cuenta cuándo AMCL convergió (se movió 0,6 m y esperó
+8 s) y `nodo_percepcion` por el supervisor: conviene que decida uno solo, para que no se pierdan
+cajas. Y cuando AMCL se pierde, se lo podría reinicializar por `/initialpose`
+con la pose del respaldo (es tema de localización).
 
 ## 1. Módulos
 

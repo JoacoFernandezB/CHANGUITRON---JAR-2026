@@ -14,6 +14,7 @@ a 2,7 m se ubicaba 0,3 m mal); moviéndose unos decímetros baja a menos de 1°.
 /equipo/amcl_convergido y percepción no ubica cajas hasta recibirlo: un solo criterio para los dos.
 """
 import math
+import traceback
 
 from action_msgs.msg import GoalStatus
 from equipo_jar.cobertura import Cobertura
@@ -191,6 +192,9 @@ class NodoMision(Node):
     def registrar_caja(self, x, y):
         if self.estado == 'FIN':
             return  # tras /done no se reporta más
+        if not (math.isfinite(x) and math.isfinite(y)):
+            self.get_logger().error(f'caja con coordenadas no finitas ({x}, {y}): no gasto un reporte')
+            return
         radio = self.valor('radio_duplicado_m')
         if any(math.hypot(x - a, y - b) < radio for a, b in self.confirmadas):
             return
@@ -466,6 +470,18 @@ class NodoMision(Node):
         self.pub_cmd.publish(cmd)
 
     def ciclo(self):
+        """Un error en un ciclo no puede matar el nodo: sin misión, el robot queda parado y se pierde
+        el resto de la corrida. Se frena, se loguea (con el traceback, para arreglarlo) y se
+        reintenta en el ciclo siguiente."""
+        try:
+            self.paso()
+        except Exception:  # a propósito: cualquier error
+            self.pub_cmd.publish(Twist())
+            self.get_logger().error(
+                f'Error en el ciclo de la misión, sigo con el próximo:\n{traceback.format_exc()}',
+                throttle_duration_sec=5.0)
+
+    def paso(self):
         if self.cobertura is None:
             return
         self.pose = self.leer_tf(self.frame_mapa, self.frame_robot)
@@ -519,6 +535,11 @@ def main():
         rclpy.spin(nodo)
     except (KeyboardInterrupt, rclpy.executors.ExternalShutdownException):
         pass
+    except Exception:
+        # Si la señal de apagado corta el spin a mitad de camino, rclpy tira RCLError: no es un
+        # error de la corrida. Con ROS funcionando sí lo es: que se vea.
+        if rclpy.ok():
+            raise
     finally:
         nodo.destroy_node()
         rclpy.try_shutdown()

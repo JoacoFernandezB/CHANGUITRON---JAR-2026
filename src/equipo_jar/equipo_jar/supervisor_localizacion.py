@@ -27,10 +27,13 @@ compara la pose que da AMCL con la que da cada referencia + /odom:
   correcto sin estar todavía ahí. También, si se quedó estable en otro lugar mientras el robot
   anduvo un buen tramo, con covarianza chica (se relocalizó de verdad y el que derivó fue /odom).
 
-Al arrancar, AMCL todavía no convergió (en las corridas, 18° de error los primeros metros) y no
-converge con el robot quieto: la primera referencia se toma recién cuando su covarianza es chica,
-o cuando el robot avanzó `avance_convergencia_m`. Si AMCL nunca publica, se usa /odom como si
-fuera el mapa (el robot arranca cerca del origen).
+Al arrancar, AMCL todavía no convergió (en las corridas, 18° de error al recibir la pose inicial)
+y quieto no termina de converger: la primera referencia se toma recién cuando nodo_mision avisa
+que convergió (`avisar_convergencia`), después de que el robot se movió. La covarianza de AMCL
+no alcanza para eso: mide cuánto se dispersan las partículas, no cuánto se equivocan. En
+simulación, con el robot quieto, llegó a σ < 6° con el ángulo 5,5° corrido, y una caja a
+2,7 m quedó ubicada 0,3 m mal. Si AMCL nunca publica, se usa /odom como si fuera el mapa (el
+robot arranca cerca del origen).
 """
 import math
 from collections import deque
@@ -61,9 +64,8 @@ class ConfigSupervisor:
     paso_referencia_m: float = 0.50          # cada cuánto avance se guarda una referencia
     ventana_referencias_m: float = 2.0       # contra las referencias de los últimos X m
     confirmar_regreso_s: float = 2.0         # AMCL coincide y quieto esto: se vuelve a usar
-    sigma_xy_convergida_m: float = 0.12      # covarianza de AMCL que se considera convergida
+    sigma_xy_convergida_m: float = 0.12      # covarianza chica, para aceptar una relocalización
     sigma_yaw_convergida_deg: float = 6.0
-    avance_convergencia_m: float = 2.0       # sin covarianza chica, se acepta tras avanzar esto
     espera_sin_amcl_s: float = 15.0          # sin ningún map -> odom tras esto: solo odometría
     avance_max_respaldo_m: float = 6.0       # desde la referencia (hasta 2 m antes del respaldo)
     giro_max_respaldo_deg: float = 1800.0    # ...o más giro que esto (cinco vueltas)
@@ -95,7 +97,8 @@ class SupervisorLocalizacion:
     def __init__(self, config):
         self.c = config
         self.t_inicio = None
-        self.mov_primera_amcl = None  # cuánto se había movido cuando AMCL publicó por primera vez
+        self.convergencia_avisada = False  # nodo_mision dijo que AMCL ya convergió
+        self.amcl_publico = False     # AMCL publicó map -> odom al menos una vez
         self.odom_anterior = None
         self.mov = Movimiento()       # acumulado desde el arranque
         self.referencias = deque()    # (corrección confiable, Movimiento cuando se tomó)
@@ -133,6 +136,10 @@ class SupervisorLocalizacion:
         return (sigma_xy <= self.c.sigma_xy_convergida_m
                 and sigma_yaw <= math.radians(self.c.sigma_yaw_convergida_deg))
 
+    def avisar_convergencia(self):
+        """nodo_mision considera que AMCL convergió: desde ahora se le puede creer."""
+        self.convergencia_avisada = True
+
     # --- Ciclo -------------------------------------------------------------------------------
 
     def actualizar(self, t, odom, correccion_amcl, t_correccion, sigmas):
@@ -149,8 +156,8 @@ class SupervisorLocalizacion:
         self.sumar_movimiento(odom)
         fresca = (correccion_amcl is not None and t_correccion is not None
                   and t - t_correccion <= self.c.max_antiguedad_s)
-        if fresca and self.mov_primera_amcl is None:
-            self.mov_primera_amcl = Movimiento(self.mov.avance, self.mov.giro)
+        if fresca:
+            self.amcl_publico = True
 
         if not self.referencias:
             return self.sin_referencia(t, correccion_amcl if fresca else None, sigmas)
@@ -195,18 +202,13 @@ class SupervisorLocalizacion:
     def sin_referencia(self, t, correccion, sigmas):
         """Antes de confiar en AMCL por primera vez."""
         if correccion is not None:
-            avance = self.mov.avance - self.mov_primera_amcl.avance
-            if self.convergida(sigmas) or avance >= self.c.avance_convergencia_m:
+            if self.convergencia_avisada:
                 self.tomar_referencia(correccion)
-                if self.convergida(sigmas):
-                    motivo = 'AMCL convergió'
-                else:
-                    motivo = (f'AMCL sin covarianza chica ({texto_sigmas(sigmas)}) tras avanzar '
-                              f'{avance:.1f} m: lo acepto igual')
-                return EstadoPose(correccion, AMCL, True, 0.0, motivo)
+                return EstadoPose(correccion, AMCL, True, 0.0,
+                                  f'nodo_mision avisó que AMCL convergió ({texto_sigmas(sigmas)})')
             return EstadoPose(correccion, CONVERGIENDO, False, 0.0,
-                              f'esperando que AMCL converja ({texto_sigmas(sigmas)})')
-        if self.mov_primera_amcl is None and t - self.t_inicio >= self.c.espera_sin_amcl_s:
+                              f'esperando el aviso de nodo_mision ({texto_sigmas(sigmas)})')
+        if not self.amcl_publico and t - self.t_inicio >= self.c.espera_sin_amcl_s:
             return EstadoPose(IDENTIDAD, SOLO_ODOM, True, self.mov.avance,
                               'AMCL nunca publicó: uso /odom como mapa')
         return EstadoPose(None, SIN_POSE, False, 0.0, 'esperando a AMCL')

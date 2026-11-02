@@ -37,32 +37,48 @@ def test_sin_amcl_espera_y_despues_usa_solo_odometria():
     assert estados[-1][1].fuente == SOLO_ODOM and estados[-1][1].correccion == (0.0, 0.0, 0.0)
 
 
-def test_no_confia_en_amcl_hasta_que_converge():
+def convergido(config=None):
+    """Un supervisor al que nodo_mision ya le avisó que AMCL convergió."""
+    sup = SupervisorLocalizacion(config or ConfigSupervisor())
+    sup.avisar_convergencia()
+    return sup
+
+
+def test_no_confia_en_amcl_hasta_el_aviso_de_mision():
     sup = SupervisorLocalizacion(ConfigSupervisor())
-    estado = sup.actualizar(0.0, recta(0.0), CORRECCION, 0.0, (0.15, math.radians(10.0)))
+    estado = sup.actualizar(0.0, recta(0.0), CORRECCION, 0.0, CONVERGIDA)
     assert estado.fuente == CONVERGIENDO and not estado.confiable
+    sup.avisar_convergencia()
     estado = sup.actualizar(0.1, recta(0.1), CORRECCION, 0.1, CONVERGIDA)
     assert estado.fuente == AMCL and estado.confiable
 
 
-def test_sin_covarianza_acepta_amcl_tras_avanzar():
-    sup = SupervisorLocalizacion(ConfigSupervisor(avance_convergencia_m=1.0))
-    estados = correr(sup, 0.0, 3.5, lambda t: CORRECCION, sigmas=None)  # 1,05 m
-    assert estados[0][1].fuente == CONVERGIENDO
-    assert estados[-1][1].fuente == AMCL
+def test_covarianza_chica_con_el_robot_quieto_no_alcanza():
+    # Como en maze_4_metal_6x6 (2026-11-01): quieto en la largada, AMCL llegó a σ < 6° con el
+    # ángulo 5,5° corrido. Sin el aviso de nodo_mision (que pide moverse), no se le cree.
+    sup = SupervisorLocalizacion(ConfigSupervisor())
+    estados = correr(sup, 0.0, 60.0, lambda t: CORRECCION, odom=lambda t: (0.0, 0.0, 0.0))
+    assert all(e.fuente == CONVERGIENDO and not e.confiable for _, e in estados)
 
 
-def test_quieto_amcl_no_converge_y_no_se_acepta_aunque_pase_el_tiempo():
-    # Con el robot quieto AMCL no se actualiza: esperar más tiempo no sirve de nada.
-    sup = SupervisorLocalizacion(ConfigSupervisor(avance_convergencia_m=1.0))
-    estados = correr(sup, 0.0, 60.0, lambda t: CORRECCION, odom=lambda t: (0.0, 0.0, 0.0),
-                     sigmas=None)
-    assert estados[-1][1].fuente == CONVERGIENDO and not estados[-1][1].confiable
+def test_avanzar_sin_el_aviso_tampoco_alcanza():
+    # Un solo criterio: aunque el robot avance, decide nodo_mision.
+    sup = SupervisorLocalizacion(ConfigSupervisor())
+    estados = correr(sup, 0.0, 10.0, lambda t: CORRECCION, sigmas=None)  # 3 m
+    assert all(e.fuente == CONVERGIENDO for _, e in estados)
+
+
+def test_el_aviso_antes_de_que_amcl_publique_espera_a_amcl():
+    sup = convergido()
+    estado = sup.actualizar(0.0, recta(0.0), None, None, None)
+    assert estado.fuente == SIN_POSE and not estado.confiable
+    estado = sup.actualizar(0.1, recta(0.1), CORRECCION, 0.1, None)
+    assert estado.fuente == AMCL and estado.correccion == CORRECCION
 
 
 def test_amcl_que_anda_bien_no_dispara_el_respaldo():
     # AMCL con ruido chico (3 cm, 2°) en la pose del robot, que es lo que estima AMCL.
-    sup = SupervisorLocalizacion(ConfigSupervisor())
+    sup = convergido()
 
     def ruidosa(t):
         x, y, yaw = componer(CORRECCION, recta(t))
@@ -76,7 +92,7 @@ def test_amcl_que_anda_bien_no_dispara_el_respaldo():
 
 def test_un_salto_de_amcl_pasa_al_respaldo_y_la_pose_sigue_bien():
     # Como en la corrida del 2026-10-30 01:19: AMCL salta 3 m y 120° y vuelve a los 9 s.
-    sup = SupervisorLocalizacion(ConfigSupervisor())
+    sup = convergido()
     perdida = componer((1.0, -3.0, 2.1), CORRECCION)
 
     def amcl(t):
@@ -93,7 +109,7 @@ def test_un_salto_de_amcl_pasa_al_respaldo_y_la_pose_sigue_bien():
 
 def test_una_deriva_lenta_de_amcl_tambien_se_detecta():
     # Como en la corrida del 2026-10-30 01:57: AMCL se va de a 0,2 m/s, de a pasitos.
-    sup = SupervisorLocalizacion(ConfigSupervisor())
+    sup = convergido()
 
     def amcl(t):
         corrimiento = max(0.0, t - 20.0) * 0.2
@@ -108,7 +124,7 @@ def test_una_deriva_lenta_de_amcl_tambien_se_detecta():
 def test_una_deriva_de_amcl_girando_en_el_lugar_se_detecta():
     # Como en maze_4 (2026-10-31): el robot gira en el lugar y AMCL se corre 0,07 m/s.
     # Girar no hace derivar la posición de /odom, así que no puede agrandar esa tolerancia.
-    sup = SupervisorLocalizacion(ConfigSupervisor())
+    sup = convergido()
     correr(sup, 0.0, 10.0, lambda t: CORRECCION)
     quieto = recta(10.0)
 
@@ -125,7 +141,7 @@ def test_una_deriva_de_amcl_girando_en_el_lugar_se_detecta():
 
 def test_la_deriva_normal_de_la_odometria_no_es_un_salto():
     # La odometría se equivoca 3% en la distancia: AMCL lo va corrigiendo y eso es normal.
-    sup = SupervisorLocalizacion(ConfigSupervisor())
+    sup = convergido()
 
     def odom_mala(t):
         return (0.3 * t * 1.03, 0.0, 0.0)
@@ -138,7 +154,7 @@ def test_la_deriva_normal_de_la_odometria_no_es_un_salto():
 
 
 def test_si_amcl_deja_de_publicar_usa_el_respaldo():
-    sup = SupervisorLocalizacion(ConfigSupervisor(max_antiguedad_s=1.0))
+    sup = convergido(ConfigSupervisor(max_antiguedad_s=1.0))
     correr(sup, 0.0, 5.0, lambda t: CORRECCION)
     # map -> odom quedó con el stamp de t = 5 s y no se actualiza más.
     estado = sup.actualizar(7.0, recta(7.0), CORRECCION, 5.0, CONVERGIDA)
@@ -147,7 +163,7 @@ def test_si_amcl_deja_de_publicar_usa_el_respaldo():
 
 
 def test_mucho_recorrido_en_respaldo_ya_no_es_confiable():
-    sup = SupervisorLocalizacion(ConfigSupervisor(avance_max_respaldo_m=2.0))
+    sup = convergido(ConfigSupervisor(avance_max_respaldo_m=2.0))
     correr(sup, 0.0, 5.0, lambda t: CORRECCION)
     estados = correr(sup, 5.0, 20.0, lambda t: None)  # AMCL muerto: 4,5 m más
     assert estados[0][1].confiable
@@ -157,7 +173,7 @@ def test_mucho_recorrido_en_respaldo_ya_no_es_confiable():
 
 def test_amcl_firme_en_otro_lugar_con_poco_recorrido_no_se_acepta():
     # Quieto o casi quieto, un AMCL equivocado puede quedarse "firme": no alcanza.
-    sup = SupervisorLocalizacion(ConfigSupervisor(estable_para_reaceptar_s=5.0))
+    sup = convergido(ConfigSupervisor(estable_para_reaceptar_s=5.0))
     correr(sup, 0.0, 5.0, lambda t: CORRECCION)
     nueva = (CORRECCION[0] + 1.0, CORRECCION[1], CORRECCION[2])
     estados = correr(sup, 5.0, 16.0, lambda t: nueva, odom=lambda t: recta(min(t, 8.0)))
@@ -167,7 +183,7 @@ def test_amcl_firme_en_otro_lugar_con_poco_recorrido_no_se_acepta():
 def test_si_amcl_se_relocaliza_de_verdad_se_acepta():
     # La referencia quedó mal (la odometría patinó feo) y AMCL se queda firme en otro lugar.
     cfg = ConfigSupervisor(estable_para_reaceptar_s=5.0)
-    sup = SupervisorLocalizacion(cfg)
+    sup = convergido(cfg)
     correr(sup, 0.0, 5.0, lambda t: CORRECCION)
     nueva = (CORRECCION[0] + 1.0, CORRECCION[1], CORRECCION[2])
     estados = correr(sup, 5.0, 16.0, lambda t: nueva)  # 11 s y 3,3 m: firme y andando

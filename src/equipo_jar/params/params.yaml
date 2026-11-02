@@ -80,6 +80,8 @@ nodo_percepcion:
     log_descartes: true             # loguea (1 por s) por qué se descarta una vista con rojo
     # Localización: cuándo creerle a AMCL y cuándo usar el respaldo con /odom
     # (equipo_jar/supervisor_localizacion.py). Todos con punto decimal: son double.
+    # Al arrancar no se le cree a AMCL hasta que nodo_mision avisa que convergió
+    # (distancia_convergencia_m y espera_convergencia_s, en nodo_mision): un solo criterio.
     loc_max_antiguedad_s: 1.5       # map -> odom más viejo que esto: AMCL no publica
     loc_margen_m: 0.10              # diferencia AMCL vs /odom que se tolera siempre
     loc_margen_deg: 8.0
@@ -91,9 +93,8 @@ nodo_percepcion:
     loc_paso_referencia_m: 0.50
     loc_ventana_referencias_m: 2.0  # se compara contra lo que decía AMCL en los últimos 2 m
     loc_confirmar_regreso_s: 2.0    # AMCL tiene que coincidir y estar quieto esto para dejar el respaldo
-    loc_sigma_xy_convergida_m: 0.12 # covarianza de AMCL que se considera convergida
+    loc_sigma_xy_convergida_m: 0.12 # covarianza chica de AMCL: solo para aceptar una relocalización
     loc_sigma_yaw_convergida_deg: 6.0
-    loc_avance_convergencia_m: 2.0  # sin covarianza chica, se le cree a AMCL tras avanzar esto
     loc_espera_sin_amcl_s: 15.0     # sin AMCL tras esto, /odom como mapa (igual que nodo_equipo)
     loc_avance_max_respaldo_m: 6.0  # en respaldo, desde la referencia: más que esto, no se ubican cajas
     loc_giro_max_respaldo_deg: 1800.0  # ...ni girando más que esto (en el robot real, medir el error de giro de /odom)
@@ -171,7 +172,7 @@ nodo_mision:
     tiempo_max_meta_s: 45.0         # más que esto (s) en una meta: se abandona
     espera_nav2_s: 25.0             # antes de esto (s) desde el mapa no se considera traba
     distancia_convergencia_m: 0.6   # hay que moverse esto (m) para que AMCL converja...
-    espera_convergencia_s: 8.0      # ...y esperar esto (s) antes de confiar en la pose
+    espera_convergencia_s: 8.0      # ...y esperar esto (s) antes de confiar en la pose (también percepción)
     radio_llegada_m: 0.15           # a esto (m) de la largada se publica /done
     intentos_regreso: 6             # metas de regreso antes de publicar /done de todos modos
     tiempo_inspeccion_s: 4.0        # cuánto se mira un objeto (s)

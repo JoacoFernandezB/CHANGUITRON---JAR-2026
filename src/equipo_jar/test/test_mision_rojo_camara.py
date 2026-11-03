@@ -57,3 +57,13 @@ def test_apagado_no_agrega_nada(nodo):
     nodo.set_parameters([Parameter('inspeccionar_rojo_camara', value=False)])
     con_rojo(nodo, (3.0, 2.0), (3.05, 2.0))
     assert nodo.zonas_rojas() == []
+
+
+def test_cerca_de_una_pared_espera_a_la_pasada_fina(nodo):
+    """Rojo a 0,15 m de una pared: en el robot real suele verse así por una ventana del panel. En
+    la primera pasada no se va a mirar; en la fina (falta alguna caja), sí."""
+    con_rojo(nodo, (2.0, 0.15), (2.05, 0.15))
+    assert nodo.zonas_rojas() == []
+    nodo.cobertura.pasar_a_fase_fina()
+    zonas = nodo.zonas_rojas()
+    assert len(zonas) == 1 and zonas[0][:2] == pytest.approx((2.025, 0.15), abs=0.05)

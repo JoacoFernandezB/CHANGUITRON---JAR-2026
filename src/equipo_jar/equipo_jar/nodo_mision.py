@@ -80,7 +80,8 @@ class NodoMision(Node):
         self.declare_parameter('veces_sin_rojo', 3)
         self.declare_parameter('celdas_sin_rojo', 3)
         self.declare_parameter('inspeccionar_rojo_camara', True)
-        self.declare_parameter('margen_pared_rojo_m', 0.10)
+        self.declare_parameter('margen_pared_rojo_m', 0.20)
+        self.declare_parameter('margen_pared_rojo_fina_m', 0.10)
         self.declare_parameter('celdas_rojo_min', 2)
         self.declare_parameter('rango_min_lidar_m', 0.05)
         self.declare_parameter('rango_max_lidar_m', 3.5)
@@ -326,12 +327,21 @@ class NodoMision(Node):
         Una caja tapada a medias por una esquina no pasa los filtros de percepción desde lejos,
         y si el lidar no la marca como objeto (vista de un solo lado) nadie iba a mirarla: en
         uno de los mapas de práctica perdía así una de sus tres cajas en la mitad de las corridas.
+
+        En la primera pasada solo cuenta el rojo lejos de las paredes (`margen_pared_rojo_m`):
+        cerca de un panel suele ser rojo visto por una ventana o un hueco (en el bag del robot real
+        del minilaberinto, todas las zonas falsas quedaron a 0,12 m de una pared), y una caja
+        contra la pared la confirma percepción sola, porque desde el lado abierto se ve entera. En
+        la pasada fina, que solo existe si todavía falta alguna caja, se revisa todo
+        (`margen_pared_rojo_fina_m`).
         """
         camara = self.vistas_camara
         if not self.valor('inspeccionar_rojo_camara') or camara is None:
             return []
+        margen = self.valor('margen_pared_rojo_fina_m' if self.cobertura.fase == 2
+                            else 'margen_pared_rojo_m')
         return [(x, y, f'{n} celdas') for x, y, n in self.cobertura.zonas_rojas(
-            camara, self.valor('margen_pared_rojo_m'), self.valor('celdas_rojo_min'))]
+            camara, margen, self.valor('celdas_rojo_min'))]
 
     def veredicto_camara(self, x, y):
         """Qué vio la cámara del objeto en (x, y): ROJO_VISTO, SIN_ROJO o SIN_VER."""

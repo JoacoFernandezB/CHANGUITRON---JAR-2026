@@ -95,6 +95,61 @@ def elegir_direccion(px, py, cuerpo, margen, alcance, direcciones=16, paso=0.01)
     return mejor
 
 
+def giro_libre(px, py, cuerpo, centro_x, sentido, margen, angulo, paso=0.05):
+    """Si el robot puede girar `angulo` (rad) alrededor de (centro_x, 0) sin acercarse a menos de
+    `margen` de nada. `sentido` es +1 a la izquierda y -1 a la derecha.
+
+    Como en el escape, lo que ya está más cerca que el margen no bloquea, salvo que el giro lo
+    acerque más.
+    """
+    inicial = distancia_al_cuerpo(px, py, cuerpo)
+    fuera = inicial > 0.0
+    if not fuera.any():
+        return True
+    qx, qy, inicial = px[fuera] - centro_x, py[fuera], inicial[fuera]
+    # Girar el robot equivale a girar los puntos para el otro lado.
+    a = -sentido * np.arange(paso, angulo + paso / 2, paso)[:, None]
+    gx = centro_x + np.cos(a) * qx - np.sin(a) * qy
+    gy = np.sin(a) * qx + np.cos(a) * qy
+    d = distancia_al_cuerpo(gx, gy, cuerpo)
+    return not (d < np.minimum(margen, inicial - 0.005)).any()
+
+
+def giro_seguro(px, py, cuerpo, w, margen, angulo, velocidad, alcance, direcciones=16,
+                paso=0.01, radio_puntos=0.6):
+    """Qué mandar en vez de un giro en el lugar de velocidad `w`: (vx, vy, wz) en el marco del robot.
+
+    El centro de giro (base_footprint) no es el centro del cuerpo: la cola barre hasta 0,23 m y
+    Nav2 deja el centro a 0,17 m de las paredes. Por eso, en orden:
+    1. si el giro no toca nada, se gira igual;
+    2. si no, se gira alrededor del centro del cuerpo (es mecanum: se combina con un lateral);
+    3. si tampoco, el robot se corre en la dirección más corta que deja girar;
+    4. si no hay ninguna, se queda quieto y actúa la detección de trabas.
+    """
+    sentido = 1.0 if w > 0.0 else -1.0
+    cerca = np.hypot(px, py) < radio_puntos
+    px, py = px[cerca], py[cerca]
+    if giro_libre(px, py, cuerpo, 0.0, sentido, margen, angulo):
+        return 0.0, 0.0, w
+    centro = (cuerpo.frente - cuerpo.atras) / 2.0
+    if giro_libre(px, py, cuerpo, centro, sentido, margen, angulo):
+        return 0.0, -centro * w, w
+    mejor = None
+    for k in range(direcciones):
+        angulo_dir = 2.0 * math.pi * k / direcciones
+        ux, uy = math.cos(angulo_dir), math.sin(angulo_dir)
+        libre = recorrido_libre(px, py, ux, uy, cuerpo, margen, alcance, paso)
+        for t in np.arange(paso, libre + 1e-9, paso):
+            if mejor is not None and t >= mejor[0]:
+                break
+            if giro_libre(px - t * ux, py - t * uy, cuerpo, 0.0, sentido, margen, angulo):
+                mejor = (t, ux, uy)
+                break
+    if mejor is None:
+        return 0.0, 0.0, 0.0
+    return velocidad * mejor[1], velocidad * mejor[2], 0.0
+
+
 class DetectorTraba:
     """Avisa si el robot está quieto o si gira sin ir a ningún lado.
 

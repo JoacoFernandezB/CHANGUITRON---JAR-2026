@@ -26,7 +26,8 @@ import traceback
 from action_msgs.msg import GoalStatus
 from equipo_jar.cobertura import Cobertura, tiempo_limite_meta
 from equipo_jar.ejecucion import main_de
-from equipo_jar.escape import Cuerpo, DetectorTraba, Escape, puntos_en_robot
+from equipo_jar.escape import (
+    Cuerpo, DetectorTraba, Escape, giro_seguro, puntos_en_robot)
 from equipo_jar.evasion import normalizar_angulo
 from equipo_jar.memoria_camara import ROJO_VISTO, SIN_ROJO, SIN_VER
 from equipo_jar.reportes import armar_reporte
@@ -95,6 +96,11 @@ class NodoMision(Node):
         self.declare_parameter('escape_alcance_m', 0.25)
         self.declare_parameter('escape_duracion_max_s', 6.0)
         self.declare_parameter('trabas_por_meta', 2)
+        self.declare_parameter('giro_seguro', True)
+        self.declare_parameter('giro_margen_m', 0.02)
+        self.declare_parameter('giro_angulo_rad', 0.6)
+        self.declare_parameter('giro_velocidad_mps', 0.08)
+        self.declare_parameter('giro_alcance_m', 0.10)
         p = self.get_parameter
         self.cantidad_victimas = p('cantidad_victimas').value
         self.frame_mapa = p('frame_mapa').value
@@ -213,7 +219,28 @@ class NodoMision(Node):
     def al_recibir_cmd_nav(self, cmd):
         self.t_cmd_nav = self.ahora()
         if self.escape is None and self.t_mirar_hasta == 0.0 and self.estado != 'FIN':
-            self.pub_cmd.publish(cmd)
+            self.pub_cmd.publish(self.cuidar_giro(cmd))
+
+    def cuidar_giro(self, cmd):
+        """Un giro en el lugar de Nav2 que barrería algo con la cola se cambia por uno seguro."""
+        en_el_lugar = abs(cmd.linear.x) < 0.02 and abs(cmd.linear.y) < 0.02
+        if not self.valor('giro_seguro') or not en_el_lugar or abs(cmd.angular.z) < 0.05:
+            return cmd
+        puntos = self.puntos_lidar()
+        if puntos is None:
+            return cmd
+        vx, vy, wz = giro_seguro(
+            puntos[0], puntos[1], self.cuerpo, cmd.angular.z, self.valor('giro_margen_m'),
+            self.valor('giro_angulo_rad'), self.valor('giro_velocidad_mps'),
+            self.valor('giro_alcance_m'))
+        if (vx, vy, wz) == (0.0, 0.0, cmd.angular.z):
+            return cmd
+        self.get_logger().info(
+            f'giro seguro: ({vx:.2f}, {vy:.2f}, {wz:.2f}) en vez de girar {cmd.angular.z:.2f}',
+            throttle_duration_sec=1.0)
+        seguro = Twist()
+        seguro.linear.x, seguro.linear.y, seguro.angular.z = vx, vy, wz
+        return seguro
 
     def al_recibir_caja(self, caja):
         x, y = caja.point.x, caja.point.y

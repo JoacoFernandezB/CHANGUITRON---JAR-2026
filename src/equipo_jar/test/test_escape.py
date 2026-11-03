@@ -5,7 +5,7 @@ import pytest
 
 from equipo_jar.escape import (
     Cuerpo, despeje_actual, DetectorTraba, distancia_al_cuerpo, elegir_direccion, Escape,
-    puntos_en_robot, recorrido_libre)
+    giro_libre, giro_seguro, puntos_en_robot, recorrido_libre)
 
 CUERPO = Cuerpo(frente=0.13, atras=0.195, semiancho=0.125)
 MARGEN = 0.02
@@ -145,3 +145,44 @@ def test_girar_tambien_cuenta_como_moverse():
     t = DetectorTraba(0.08, 0.3, 6.0, 0.15, 15.0)
     t.actualizar(0.0, 0.0, 0.0, 0.0)
     assert not t.actualizar(0.0, 0.0, 0.5, 7.0)
+
+
+def test_giro_libre_en_el_medio_de_una_sala():
+    px, py = juntar(pared(x=1.0), pared(x=-1.0), pared(y=1.0), pared(y=-1.0))
+    assert giro_libre(px, py, CUERPO, 0.0, 1.0, MARGEN, 0.3)
+
+
+def test_la_cola_barre_lo_que_tiene_detras_al_costado():
+    # Una caja a 4 cm del costado izquierdo, a la altura de la cola: girando a la derecha, la cola
+    # (0,195 m atrás) va hacia la izquierda y la toca; girando a la izquierda se aleja.
+    px, py = np.array([-0.18, -0.15]), np.array([0.165, 0.165])
+    assert not giro_libre(px, py, CUERPO, 0.0, -1.0, MARGEN, 0.3)
+    assert giro_libre(px, py, CUERPO, 0.0, 1.0, MARGEN, 0.3)
+
+
+def test_giro_seguro_deja_pasar_un_giro_libre():
+    px, py = juntar(pared(x=1.0), pared(y=1.0))
+    assert giro_seguro(px, py, CUERPO, 1.0, MARGEN, 0.3, 0.08, 0.10) == (0.0, 0.0, 1.0)
+
+
+def test_giro_seguro_gira_alrededor_del_centro_del_cuerpo():
+    # A 0,227 m de base_footprint, al costado de la cola: girando sobre base_footprint la esquina
+    # trasera (a 0,232 m) lo barre; sobre el centro del cuerpo, que está 3,25 cm más atrás, las
+    # esquinas quedan a 0,205 m y el punto a 0,225 m.
+    px, py = np.array([-0.0325]), np.array([-0.225])
+    vx, vy, wz = giro_seguro(px, py, CUERPO, 1.0, MARGEN, 1.0, 0.08, 0.10)
+    assert wz == 1.0 and vx == 0.0
+    assert vy == pytest.approx(0.0325)
+
+
+def test_giro_seguro_se_corre_si_no_puede_girar():
+    # Pared a 3 cm del costado izquierdo: ningún giro entra, hay que correrse a la derecha.
+    px, py = pared(y=0.155)
+    vx, vy, wz = giro_seguro(px, py, CUERPO, 1.0, MARGEN, 0.3, 0.08, 0.10)
+    assert wz == 0.0
+    assert vy < 0.0
+
+
+def test_giro_seguro_se_queda_quieto_si_no_hay_salida():
+    px, py = juntar(pared(y=0.14), pared(y=-0.14), pared(x=0.145), pared(x=-0.21))
+    assert giro_seguro(px, py, CUERPO, 1.0, MARGEN, 0.3, 0.08, 0.10) == (0.0, 0.0, 0.0)

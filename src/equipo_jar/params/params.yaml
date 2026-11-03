@@ -195,6 +195,12 @@ nodo_mision:
     descartar_con_camara: true
     veces_sin_rojo: 3               # imágenes sin rojo que tiene que tener cada celda del objeto...
     celdas_sin_rojo: 3              # ...y cuántas celdas así, para darlo por visto sin rojo
+    # Ir a mirar de cerca también donde la cámara vio rojo y no hay caja todavía (una caja tapada
+    # a medias por una esquina que el lidar no marca como objeto). No cuenta lo que está a menos
+    # de margen_pared_rojo_m de una pared del mapa (la pared, o rojo visto por una ventana).
+    inspeccionar_rojo_camara: true
+    margen_pared_rojo_m: 0.10
+    celdas_rojo_min: 2              # celdas rojas que tiene que juntar una zona
     rango_min_lidar_m: 0.05
     rango_max_lidar_m: 3.5
     # Rectángulo del robot respecto de base_footprint: tiene que coincidir con la huella de Nav2.

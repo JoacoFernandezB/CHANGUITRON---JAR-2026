@@ -8,7 +8,7 @@ import heapq
 import math
 
 import cv2
-from equipo_jar.memoria_camara import veredicto
+from equipo_jar.memoria_camara import ROJO, veredicto
 import numpy as np
 
 # Vecinos de una celda: (fila, columna, largo del paso en celdas).
@@ -210,6 +210,34 @@ class Cobertura:
         disco = np.hypot(ii - i, jj - j) * self.res <= radio_m
         objeto = disco & (self.cuenta[f0:f1, c0:c1] >= 2)
         return veredicto(camara[f0:f1, c0:c1], objeto, veces_min, celdas_min)
+
+    def zonas_rojas(self, camara, margen_pared_m, celdas_min):
+        """Centros (x, y) de las zonas de piso alcanzable donde la cámara vio rojo.
+
+        `camara`: la grilla de /equipo/vistas_camara (memoria_camara.ROJO = alguna imagen vio rojo
+        ahí, donde estaría una caja apoyada en la celda en la que pegó el rayo del lidar).
+        Para qué: una caja tapada a medias por la esquina de una pared se ve angosta, y percepción
+        descarta esas vistas (su centro saldría corrido); si además el lidar no la marca como
+        objeto, nadie iba a mirarla de cerca. Pegado a una pared del mapa (menos de
+        `margen_pared_m`) no cuenta: es la pared misma o rojo visto a través de una ventana. Cada
+        zona tiene que juntar al menos `celdas_min` celdas rojas.
+        """
+        camara = np.asarray(camara)
+        if camara.shape != self.libre.shape:
+            return []
+        rojo = (camara >= ROJO) & self.alcanzable & (self.d_mapa >= margen_pared_m)
+        if not rojo.any():
+            return []
+        n, etiquetas = cv2.connectedComponents(
+            cv2.dilate(rojo.astype(np.uint8), np.ones((5, 5), np.uint8)))
+        zonas = []
+        for k in range(1, n):
+            celdas = (etiquetas == k) & rojo
+            if celdas.sum() < celdas_min:
+                continue
+            ii, jj = np.nonzero(celdas)
+            zonas.append(self.xy(ii.mean(), jj.mean()))
+        return zonas
 
     def olvidar_objetos(self):
         self.nuevos[:] = False

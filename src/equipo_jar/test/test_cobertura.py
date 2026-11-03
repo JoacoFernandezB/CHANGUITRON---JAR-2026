@@ -258,3 +258,42 @@ def test_distancias_desde_una_pose_del_lado_negativo_arranca_en_el_borde_cercano
     c = cobertura(sala())
     d = c.distancias_desde(-1.0, -1.0)
     assert c.distancia_a(d, 0.5, 0.5) < c.distancia_a(d, 3.5, 2.5)
+
+
+def camara_con_rojo(c, *puntos):
+    """Grilla de la cámara con rojo en las celdas de `puntos` (x, y)."""
+    camara = np.zeros((c.alto, c.ancho), dtype=np.int16)
+    for x, y in puntos:
+        camara[c.celda(x, y)] = ROJO
+    return camara
+
+
+def test_una_zona_roja_en_el_piso_es_para_ir_a_mirar():
+    """Antes: una caja que el lidar no marcaba como objeto no se inspeccionaba nunca, aunque la
+    cámara la hubiera visto roja (tapada a medias, percepción no la puede ubicar desde ahí)."""
+    c = cobertura(sala())
+    zonas = c.zonas_rojas(camara_con_rojo(c, (2.0, 1.5), (2.05, 1.5), (2.1, 1.55)), 0.10, 2)
+    assert len(zonas) == 1
+    assert zonas[0] == pytest.approx((2.05, 1.52), abs=0.05)
+
+
+def test_rojo_pegado_a_una_pared_o_suelto_no_es_zona():
+    c = cobertura(sala())
+    # Pegado a la pared de abajo (rojo visto a través de una ventana pega en la pared) ...
+    assert c.zonas_rojas(camara_con_rojo(c, (2.0, 0.05), (2.05, 0.05)), 0.10, 2) == []
+    # ... y una sola celda roja (un reflejo) tampoco.
+    assert c.zonas_rojas(camara_con_rojo(c, (2.0, 1.5)), 0.10, 2) == []
+
+
+def test_dos_zonas_rojas_separadas_son_dos():
+    c = cobertura(sala())
+    camara = camara_con_rojo(c, (1.0, 1.0), (1.05, 1.0), (3.0, 2.0), (3.05, 2.0))
+    zonas = sorted(c.zonas_rojas(camara, 0.10, 2))
+    assert len(zonas) == 2
+    assert zonas[0][0] == pytest.approx(1.025, abs=0.05)
+    assert zonas[1][0] == pytest.approx(3.025, abs=0.05)
+
+
+def test_una_grilla_de_otro_tamano_no_da_zonas():
+    c = cobertura(sala())
+    assert c.zonas_rojas(np.full((5, 5), ROJO, dtype=np.int16), 0.10, 1) == []

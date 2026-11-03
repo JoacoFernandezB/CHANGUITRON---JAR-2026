@@ -79,6 +79,9 @@ class NodoMision(Node):
         self.declare_parameter('descartar_con_camara', True)
         self.declare_parameter('veces_sin_rojo', 3)
         self.declare_parameter('celdas_sin_rojo', 3)
+        self.declare_parameter('inspeccionar_rojo_camara', True)
+        self.declare_parameter('margen_pared_rojo_m', 0.10)
+        self.declare_parameter('celdas_rojo_min', 2)
         self.declare_parameter('rango_min_lidar_m', 0.05)
         self.declare_parameter('rango_max_lidar_m', 3.5)
         self.declare_parameter('frente_robot_m', 0.13)
@@ -312,9 +315,23 @@ class NodoMision(Node):
         if ahora - self.ultimo_objetos > 1.0:
             self.ultimo_objetos = ahora
             self.anotar_objetos(self.cobertura.objetos_nuevos(), ahora)
+            self.anotar_objetos(self.zonas_rojas(), ahora, 'rojo de la cámara')
             self.revisar_objetos(ahora)
 
     # Objetos fuera del mapa: cuáles hace falta ir a mirar
+
+    def zonas_rojas(self):
+        """Donde la cámara vio rojo y todavía no hay una caja: también se va a mirar de cerca.
+
+        Una caja tapada a medias por una esquina no pasa los filtros de percepción desde lejos,
+        y si el lidar no la marca como objeto (vista de un solo lado) nadie iba a mirarla: en
+        uno de los mapas de práctica perdía así una de sus tres cajas en la mitad de las corridas.
+        """
+        camara = self.vistas_camara
+        if not self.valor('inspeccionar_rojo_camara') or camara is None:
+            return []
+        return self.cobertura.zonas_rojas(
+            camara, self.valor('margen_pared_rojo_m'), self.valor('celdas_rojo_min'))
 
     def veredicto_camara(self, x, y):
         """Qué vio la cámara del objeto en (x, y): ROJO_VISTO, SIN_ROJO o SIN_VER."""
@@ -336,7 +353,7 @@ class NodoMision(Node):
             return 'la cámara lo vio sin rojo'
         return None
 
-    def anotar_objetos(self, objetos, ahora):
+    def anotar_objetos(self, objetos, ahora, origen='objeto no mapeado'):
         """Los objetos nuevos que el lidar ve fuera del mapa quedan para inspeccionar, salvo los
         que la cámara ya vio sin rojo: una caja de otro color, un señuelo, una pared que falta."""
         radio = self.valor('radio_objeto_conocido_m')
@@ -344,7 +361,7 @@ class NodoMision(Node):
             conocidos = self.confirmadas + self.inspeccionados + self.pendientes + self.descartados
             if any(math.hypot(cx - a, cy - b) < radio for a, b in conocidos):
                 continue
-            texto = f'objeto no mapeado ({cx:.2f}, {cy:.2f}) t={ahora - self.t_inicio:.1f}'
+            texto = f'{origen} ({cx:.2f}, {cy:.2f}) t={ahora - self.t_inicio:.1f}'
             if self.veredicto_camara(cx, cy) == SIN_ROJO:
                 self.descartados.append((cx, cy))
                 self.get_logger().info(texto + ': la cámara ya lo vio sin rojo, no lo inspecciono')

@@ -274,7 +274,8 @@ def test_una_zona_roja_en_el_piso_es_para_ir_a_mirar():
     c = cobertura(sala())
     zonas = c.zonas_rojas(camara_con_rojo(c, (2.0, 1.5), (2.05, 1.5), (2.1, 1.55)), 0.10, 2)
     assert len(zonas) == 1
-    assert zonas[0] == pytest.approx((2.05, 1.52), abs=0.05)
+    assert zonas[0][:2] == pytest.approx((2.05, 1.52), abs=0.05)
+    assert zonas[0][2] == 3
 
 
 def test_rojo_pegado_a_una_pared_o_suelto_no_es_zona():

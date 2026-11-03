@@ -212,7 +212,8 @@ class Cobertura:
         return veredicto(camara[f0:f1, c0:c1], objeto, veces_min, celdas_min)
 
     def zonas_rojas(self, camara, margen_pared_m, celdas_min):
-        """Centros (x, y) de las zonas de piso alcanzable donde la cámara vio rojo.
+        """(x, y, celdas) de cada zona de piso alcanzable donde la cámara vio rojo: su centro y
+        cuántas celdas rojas junta.
 
         `camara`: la grilla de /equipo/vistas_camara (memoria_camara.ROJO = alguna imagen vio rojo
         ahí, donde estaría una caja apoyada en la celda en la que pegó el rayo del lidar).
@@ -236,7 +237,7 @@ class Cobertura:
             if celdas.sum() < celdas_min:
                 continue
             ii, jj = np.nonzero(celdas)
-            zonas.append(self.xy(ii.mean(), jj.mean()))
+            zonas.append((*self.xy(ii.mean(), jj.mean()), int(celdas.sum())))
         return zonas
 
     def olvidar_objetos(self):

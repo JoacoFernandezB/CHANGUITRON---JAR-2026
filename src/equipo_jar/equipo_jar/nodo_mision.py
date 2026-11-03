@@ -330,8 +330,8 @@ class NodoMision(Node):
         camara = self.vistas_camara
         if not self.valor('inspeccionar_rojo_camara') or camara is None:
             return []
-        return self.cobertura.zonas_rojas(
-            camara, self.valor('margen_pared_rojo_m'), self.valor('celdas_rojo_min'))
+        return [(x, y, f'{n} celdas') for x, y, n in self.cobertura.zonas_rojas(
+            camara, self.valor('margen_pared_rojo_m'), self.valor('celdas_rojo_min'))]
 
     def veredicto_camara(self, x, y):
         """Qué vio la cámara del objeto en (x, y): ROJO_VISTO, SIN_ROJO o SIN_VER."""
@@ -357,11 +357,13 @@ class NodoMision(Node):
         """Los objetos nuevos que el lidar ve fuera del mapa quedan para inspeccionar, salvo los
         que la cámara ya vio sin rojo: una caja de otro color, un señuelo, una pared que falta."""
         radio = self.valor('radio_objeto_conocido_m')
-        for cx, cy in objetos:
+        for objeto in objetos:
+            cx, cy = objeto[0], objeto[1]
+            detalle = f', {objeto[2]}' if len(objeto) > 2 else ''
             conocidos = self.confirmadas + self.inspeccionados + self.pendientes + self.descartados
             if any(math.hypot(cx - a, cy - b) < radio for a, b in conocidos):
                 continue
-            texto = f'{origen} ({cx:.2f}, {cy:.2f}) t={ahora - self.t_inicio:.1f}'
+            texto = f'{origen} ({cx:.2f}, {cy:.2f}{detalle}) t={ahora - self.t_inicio:.1f}'
             if self.veredicto_camara(cx, cy) == SIN_ROJO:
                 self.descartados.append((cx, cy))
                 self.get_logger().info(texto + ': la cámara ya lo vio sin rojo, no lo inspecciono')

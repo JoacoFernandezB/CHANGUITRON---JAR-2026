@@ -51,12 +51,31 @@ figura en la sección 0; el resto sigue siendo propuesta.
   potential*: encontraba que había camino pero no lo podía trazar.
 - **RPP sin `use_collision_detection`:** con la detección prendida, la huella real toca el costmap
   en huecos por los que el robot entra, y RPP no avanza (quedó en 0 puntos en `maze_4_metal_6x6`).
+  Se volvió a probar el 3/11 con el suavizador en 1 iteración: no choca, pero en `maze_1` frena
+  junto a la caja azul y espera hasta la traba, y pierde el bono de los 5 minutos en 4 de 12
+  corridas (1 de 3 con la proyección en 0,5 s, `max_allowed_time_to_collision_up_to_carrot`).
+- **Giro seguro** (`giro_seguro` en `escape.py`, desde `nodo_mision`): la cola barre hasta 0,23 m
+  del centro de giro y Nav2 deja el centro a 0,17 m de las paredes, así que los roces que quedaban
+  eran giros en el lugar junto a una caja o la punta de un panel. Antes de dejar pasar un giro de
+  Nav2 se mira con el lidar si la huella pasaría a menos de 2 cm de algo en los próximos 0,6 rad
+  (al frenar desde 1 rad/s el robot sigue girando hasta 0,5 rad). Si toca, gira alrededor del
+  centro del cuerpo (es mecanum: se suma un lateral); si tampoco, se corre hasta 10 cm hacia
+  donde pueda girar; si no hay lugar, se queda quieto y actúa la traba.
+- **Suavizador de Smac en 1 iteración** (`smoother.max_iterations`, antes 1000): enderezaba el
+  camino hasta el borde del radio inscripto y casi la mitad de los planes pasaban a 0,18 m de la
+  pared. Con 1, el plan pasa a 0,20-0,23 m de la punta de `maze_3`.
+- **Choques medidos** contra la geometría de colisión del `.world` con la pose real del simulador
+  (el juez de práctica no los cuenta), tandas del 3/11 de 600 s en los 4 mapas con los 3 spawns:
+  con giro seguro y suavizador, en 24 corridas ningún contacto del cuerpo, la huella de Nav2
+  nunca a menos de 1 cm (a menos de 2 cm, 2 veces) y el bono de los 5 minutos en todas las de
+  `maze_1`, `maze_3` y `maze_4`. Con main (lookahead 0,25), 0 contactos del cuerpo en 12
+  corridas, pero la huella a menos de 1 cm en 2 y a menos de 2 cm en 10.
 - **RPP con `lookahead_dist` 0,25** (antes 0,40): con el punto a 0,40 m, en una U alrededor de la
   punta de un panel RPP corta la curva ~10 cm hacia adentro y roza la punta. Choques medidos contra
   la geometría del `.world` (el juez de práctica no los cuenta), tandas del 2/11 en los 4 mapas:
   los de la caja distractora de `maze_1` (2-3 por corrida) desaparecen y las trabas bajan, con los
-  mismos puntos. Queda el roce en la punta de `maze_3` al salir del giro en el lugar
-  (`rotate_to_heading_min_angle`, sin probar).
+  mismos puntos. El roce que quedaba en la punta de `maze_3`, al salir del giro en el lugar, lo
+  resuelven el giro seguro y el suavizador.
 - **Trabas** (`escape.py`): tras 6 s quieto, o 15 s sin alejarse 0,15 m aunque gire, se cancela la
   meta y el robot sale despacio hacia donde el lidar ve más lugar, también de costado. Reintenta la
   meta una vez; a la segunda traba la abandona.
